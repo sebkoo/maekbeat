@@ -10,6 +10,13 @@ export default mergeConfig(
   defineConfig({
     test: {
       environment: "jsdom",
+      // The Playwright smoke suite lives in e2e/ and runs in a real browser
+      // against real processes (playwright.config.ts). It is excluded here for
+      // two reasons: vitest cannot run it, and its coverage must never enter
+      // this ratchet — an end-to-end pass that walks through a file is not the
+      // same evidence as a unit test that pins its behaviour, and letting it
+      // count would let the threshold rise while the real coverage fell.
+      exclude: ["e2e/**", "node_modules/**"],
       // Test-harness wiring only (Testing Library auto-cleanup); it sits beside
       // the configs at the package root, not in src/, because it is not app code.
       setupFiles: ["./vitest.setup.ts"],

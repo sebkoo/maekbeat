@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
-    "demo:gif": "node --import tsx scripts/capture-demo.mjs"
+    "demo:gif": "node --import tsx scripts/capture-demo.mjs",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@maekbeat/protocol": "workspace:*",
@@ -22,7 +23,9 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@maekbeat/vitals-sim": "workspace:*",
+    "@playwright/test": "^1.62.1",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.3",
     "@types/node": "^22.20.1",

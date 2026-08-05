@@ -10,6 +10,7 @@ pnpm --filter @maekbeat/web test
 pnpm --filter @maekbeat/web test:coverage   # v8 coverage + threshold gate (joined the CI gate at C10)
 pnpm --filter @maekbeat/web typecheck
 pnpm --filter @maekbeat/web build           # static bundle in dist/
+pnpm --filter @maekbeat/web test:e2e        # Playwright smoke: real browser, real server
 ```
 
 Point the dashboard at a server with `VITE_API_BASE_URL` ([.env.example](.env.example)); it defaults to `http://127.0.0.1:3000`. The server alone ingests nothing, so `pnpm --filter @maekbeat/server dev` in a second shell gives the honest empty state; add `pnpm --filter @maekbeat/server demo` in a third and the device list fills from the ring buffer that run drives.
@@ -112,6 +113,27 @@ At rest the page has exactly one live region ([src/components/AlertAnnouncer.tsx
 The fetch call is isolated in [src/api/http.ts](src/api/http.ts) and the socket in [src/api/stream.ts](src/api/stream.ts), both injected (`fetchImpl`, `createSocket`, `schedule`), so tests drive a fake socket and a fake clock and never patch globals — and a source scan in [src/styles/tokens.test.ts](src/styles/tokens.test.ts) fails the build if any other file opens a connection. Components reach data only through the context in [src/data/api-context.tsx](src/data/api-context.tsx): C11 added the `subscribe` member there, exactly as the C10 seam was built for, and no component constructs a transport.
 
 Failures are typed by cause — `network`, `http`, `contract` — which is what lets the UI tell "the server is down" apart from "the server said no" ([src/components/StatusPanel.tsx](src/components/StatusPanel.tsx)).
+
+## What end-to-end owns, and what it does not (C13)
+
+The smoke suite in [e2e/](e2e) runs a real Chromium against the production bundle and a real apps/server process, talking across origins. It exists because two defects reached `main` with every other gate green: a dashboard that could not reach its own API from a browser, and a server feature that could have been left unwired. Both are the same disease — nothing verified what the process runs.
+
+The boundary is deliberate, and holding it is the point. End-to-end owns wiring, origins, the production build, and behaviour that only a real engine has: computed styles, focus, layout-dependent contrast, target boxes. Unit tests own logic, edge cases, properties, and every failure path that is expensive or impossible to stage in a browser — a refused decision, a malformed frame, a clock stepping backwards.
+
+So the suite is five tests, not fifty. One journey covers load, list, stream, alert, acknowledge, and reload; one covers the honest-failure path; three re-run the accessibility assertions in the real engine. Anything that could be a unit test belongs in `src/`, because a slow suite gets skipped and a skipped gate is worse than none.
+
+| Check                                  | Browser-verified (e2e) | jsdom-only (src)                           |
+| -------------------------------------- | ---------------------- | ------------------------------------------ |
+| axe structural rules                   | yes                    | yes                                        |
+| axe colour contrast                    | yes                    | no — asserted statically in tokens.test.ts |
+| keyboard activation of the ack control | yes, real key events   | yes, via user-event                        |
+| focus ring visible                     | yes, computed style    | no                                         |
+| target size at 24x24                   | yes, measured box      | no — asserted as a CSS declaration         |
+| live-region scope                      | yes                    | yes                                        |
+
+Retries are set to zero, in CI too ([playwright.config.ts](playwright.config.ts)). A smoke test that quietly passes on the second attempt reports a system that works when what it saw was a system that failed and then worked — the same lie as a coverage badge left quietly stale.
+
+The suite is excluded from the unit coverage ratchet ([vitest.config.ts](vitest.config.ts)): an end-to-end pass that walks through a file is not the same evidence as a unit test that pins its behaviour, and letting it count would let the threshold rise while real coverage fell.
 
 ## Test map
 

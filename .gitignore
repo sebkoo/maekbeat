@@ -25,3 +25,7 @@ xcuserdata/
 *.xcresult
 
 # Note: .claude/ and .githooks/ are tracked; do not ignore them.
+# Playwright
+apps/web/test-results/
+apps/web/playwright-report/
+apps/web/blob-report/

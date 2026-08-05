@@ -92,3 +92,24 @@ resolved one, so arrival order hid the bug; and the whole feature could be
 unwired in `buildApp` with all 111 server tests still green, because every unit
 test built its own engine. The integration suite in
 apps/server/src/retention.integration.test.ts exists because of that last one.
+
+## C13 — Playwright smoke
+
+The acceptance requirement for the smoke suite was not "it runs" but "it catches
+the class that got through". Three reverts, each run against both gates:
+
+| Reverted                                             | Unit and integration suites | Smoke suite |
+| ---------------------------------------------------- | --------------------------- | ----------- |
+| the CORS registration in `buildApp` (the C12 defect) | fail                        | fail        |
+| the decision route's fan-out and the client's POST   | fail                        | fail        |
+| the production bundle's asset base path              | **pass**                    | fail        |
+
+The first two fail in both places today, and that is worth stating plainly: C12
+and C12a added unit tests for exactly those defects after the fact, so the
+suites now cover them. What they could not cover before, and still cannot in
+general, is the third row — nothing below the browser builds the bundle, so a
+production build that cannot load its own assets is invisible to every unit
+test in the repo and obvious to the smoke suite in under two seconds.
+
+That is the reach this commit buys: not the specific bugs already caught, but
+the class of defect that lives between the pieces.

@@ -1,7 +1,6 @@
-import type { AlertRuleConfig } from "@maekbeat/protocol";
 import { describe, expect, it } from "vitest";
 
-import { ALERT_HISTORY_LIMIT } from "./alerts";
+import { ALERT_HISTORY_LIMIT, type AlertRuleConfig } from "./alerts";
 import { buildApp } from "./app";
 import { loadConfig } from "./config";
 

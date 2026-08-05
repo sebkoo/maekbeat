@@ -87,6 +87,38 @@ jobs:
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  # Proves the system a visitor actually gets: the production bundle in a real
+  # Chromium, talking cross-origin to a real apps/server process. Two defects
+  # reached main with every other job green — a dashboard that could not reach
+  # its own API from a browser (C12) and a retention rule that could have been
+  # left unwired (C12a) — because nothing verified what the process runs.
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      # The browser is ~90 MB and changes only when Playwright does, so the
+      # cache key is the resolved Playwright version rather than the lockfile.
+      - id: playwright-version
+        run: echo "version=$(pnpm --filter @maekbeat/web exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+      - if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm --filter @maekbeat/web exec playwright install --with-deps chromium
+      # System dependencies still need installing on a cache hit.
+      - if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: pnpm --filter @maekbeat/web exec playwright install-deps chromium
+      - run: pnpm --filter @maekbeat/web test:e2e
+
   # Proves the repository docs pass the same prettier and markdownlint gates the pre-commit hook enforces.
   docs-lint:
     runs-on: ubuntu-latest
