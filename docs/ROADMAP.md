@@ -10,12 +10,12 @@ Commits are ordered by dependency, not by calendar, and independent commits may 
 
 - C0 — chore: repo bootstrap (this commit — shipped). Config, hooks, CI, and the docs set including this file.
 
-## Phase 2 — Contract & simulator (in progress)
+## Phase 2 — Contract & simulator (complete)
 
 - C1 — feat(protocol): shared types + zod schemas in packages/protocol — shipped [63be391](https://github.com/sebkoo/maekbeat/commit/63be391): strict vitals frame schema with transport-validity bounds, the `frameKey` dedupe identity, and the workspace test + typecheck CI job pulled forward from the C5 plan.
 - C2 — feat(vitals-sim): synthetic HR/SpO2/respiration/motion generator with rest, motion, and anomaly scenarios — shipped [01b9007](https://github.com/sebkoo/maekbeat/commit/01b9007): Irwin–Hall noise for cross-engine byte determinism, HR read noise coupled to motion amplitude, and an enforced spo2LagTicks ≥ 1 desaturation-lag invariant.
-- C3 — test(vitals-sim): golden-file scenario tests (shipped).
-- C4 — docs: ARCHITECTURE.md with mermaid diagrams and latency budgets (frame→dashboard under 2 s, alert fan-out under 5 s — all labeled targets until C19 measures them). Scaling chain: BLE device (sim) → iOS gateway → WebSocket ingestion → event queue (in-process ring buffer in dev; SQS in the target architecture) → stream processor (alert engine) → storage (S3 raw archive; time-series considerations) → dashboard fan-out + caregiver notification. Each stage must answer for five failure modes: device disconnect, duplicate packets, delayed or out-of-order packets, clock drift, and offline buffering with replay.
+- C3 — test(vitals-sim): golden-file scenario tests — shipped [6ba9c91](https://github.com/sebkoo/maekbeat/commit/6ba9c91): NDJSON fixtures regenerable byte-for-byte from their own headers, four gates per fixture, and golden:update running the full suite with its pass-by-construction byte gates documented.
+- C4 — docs: ARCHITECTURE.md with mermaid diagrams and latency budgets (frame→dashboard under 2 s, alert fan-out under 5 s — all labeled targets until C19 measures them). Scaling chain: BLE device (sim) → iOS gateway → WebSocket ingestion → event queue (in-process ring buffer in dev; SQS in the target architecture) → stream processor (alert engine) → storage (S3 raw archive; time-series considerations) → dashboard fan-out + caregiver notification. Each stage must answer for five failure modes: device disconnect, duplicate packets, delayed or out-of-order packets, clock drift, and offline buffering with replay. — shipped: failure-mode ownership table code-backed to packages/protocol, the clock-drift policy fixed (receivedAtMs − capturedAtMs delta, alert windows on server receive time), and per-budget C19 measurement methods; sha chip backfills at C5.
 
 ## Phase 3 — Server (planned)
 

@@ -36,9 +36,10 @@ Notes on the contract:
   regression as a new session — is a C6 ingest decision, exercised for real by
   the C15 BLE reconnect work (docs/ROADMAP.md).
 - The wire frame carries one timestamp, `capturedAtMs` (device clock). It has no
-  upper bound at the contract level — freshness is an ingest-time check — and the
+  freshness bound at the contract level — freshness is an ingest-time check — and the
   server stamps its own `receivedAtMs` at ingest (planned — C6); clock-drift
-  handling lands with the C4 architecture doc (docs/ROADMAP.md).
+  handling is specified in docs/ARCHITECTURE.md (the `receivedAtMs − capturedAtMs`
+  delta is the drift signal; alert windows evaluate on server receive time).
 - Integer scaling is deliberate: `heartRateBpm` is whole beats, matching how BLE
   heart-rate measurements are reported; `spo2Pct` and `respirationRpm` allow
   fractional resolution; `motion` is unitless, normalized to 0–1.

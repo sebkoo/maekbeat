@@ -20,31 +20,31 @@ Imagine a bracelet that counts heartbeats while someone sleeps. Maekbeat is ever
 
 ```mermaid
 flowchart LR
-  SIM["packages/vitals-sim"] -->|"BLE GATT"| IOS["apps/ios"]
+  SIM["packages/vitals-sim"] -->|"BLE (simulated)"| IOS["apps/ios"]
   IOS -->|"WebSocket"| API["apps/server API"]
   API --> Q["queue"]
   Q --> S3["S3 archive"]
-  Q --> FAN["Lambda fan-out"]
-  FAN --> ALERT["caregiver alert"]
-  API -->|"live stream"| WEB["apps/web dashboard"]
+  Q --> AL["alert engine"]
+  AL -->|"live stream"| WEB["apps/web dashboard"]
+  AL -->|"Lambda fan-out"| ALERT["caregiver alert"]
 ```
 
-The full design, with latency budgets and failure modes, lands in docs/ARCHITECTURE.md at C4.
+The full design, with latency budgets and failure modes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Design notes
 
-| Topic                                    | Where                                                              | Status               |
-| ---------------------------------------- | ------------------------------------------------------------------ | -------------------- |
-| BLE→cloud pipeline design                | docs/ARCHITECTURE.md scaling chain + failure modes                 | C4 (planned)         |
-| Alert validation without patient data    | synthetic scenarios + golden tests; apps/server tests              | C3 ✅ · C8 (planned) |
-| Scaling model and load evidence          | target architecture + k6 results                                   | C4, C19 (planned)    |
-| Production monitoring                    | OpenTelemetry + dashboards-as-code                                 | C18 (planned)        |
-| Health-data security posture             | [SECURITY.md](SECURITY.md) (today) · docs/security/threat-model.md | C22 (planned)        |
-| iOS background execution + BLE lifecycle | apps/ios BLE state machine + background notes                      | C15 (planned)        |
-| Tooling choices and trade-offs           | [docs/DECISIONS.md](docs/DECISIONS.md) (10 entries today)          | C0 ✅                |
-| Process auditability                     | ADRs in docs/adr · PR template + CI hygiene job in .github         | C0 ✅                |
+| Topic                                    | Where                                                                      | Status                |
+| ---------------------------------------- | -------------------------------------------------------------------------- | --------------------- |
+| BLE→cloud pipeline design                | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) scaling chain + failure modes | C4 ✅                 |
+| Alert validation without patient data    | synthetic scenarios + golden tests; apps/server tests                      | C3 ✅ · C8 (planned)  |
+| Scaling model and load evidence          | target architecture + k6 results                                           | C4 ✅ · C19 (planned) |
+| Production monitoring                    | OpenTelemetry + dashboards-as-code                                         | C18 (planned)         |
+| Health-data security posture             | [SECURITY.md](SECURITY.md) (today) · docs/security/threat-model.md         | C22 (planned)         |
+| iOS background execution + BLE lifecycle | apps/ios BLE state machine + background notes                              | C15 (planned)         |
+| Tooling choices and trade-offs           | [docs/DECISIONS.md](docs/DECISIONS.md) (10 entries today)                  | C0 ✅                 |
+| Process auditability                     | ADRs in docs/adr · PR template + CI hygiene job in .github                 | C0 ✅                 |
 
-Engineers: start at docs/ARCHITECTURE.md · the why: [docs/DECISIONS.md](docs/DECISIONS.md) · the plan: [docs/ROADMAP.md](docs/ROADMAP.md).
+Engineers: start at [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · the why: [docs/DECISIONS.md](docs/DECISIONS.md) · the plan: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Quickstart
 
@@ -69,16 +69,16 @@ scripts/     bootstrap + hygiene checks
 
 ## Status
 
-| Phase                    | Ships                                                                                                                                         | Status | Commits                                                                                                                                        |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1 — Foundations          | toolchain, guardrails, docs harness — foundation commit — application code intentionally starts at C1; see [docs/ROADMAP.md](docs/ROADMAP.md) | ✅     | [C0](https://github.com/sebkoo/maekbeat/commits/main)                                                                                          |
-| 2 — Contract & simulator | zod schemas, vitals-sim, golden tests, architecture doc                                                                                       | 🔄     | [C1 protocol](https://github.com/sebkoo/maekbeat/commit/63be391) · [C2 vitals-sim](https://github.com/sebkoo/maekbeat/commit/01b9007) · C3, C4 |
-| 3 — Server               | Fastify, WS ingest, alert engine, tests, coverage gate                                                                                        | ⬜     | C5–C9                                                                                                                                          |
-| 4 — Web                  | React scaffold, live chart, timeline + ack, tests                                                                                             | ⬜     | C10–C13                                                                                                                                        |
-| 5 — iOS                  | SwiftUI, CoreBluetooth, notifications, XCTest                                                                                                 | ⬜     | C14–C17                                                                                                                                        |
-| 6 — Infra & operations   | Docker + compose, OTel, CDK synth-in-CI, k6                                                                                                   | ⬜     | C18–C19                                                                                                                                        |
-| 7 — Depth                | intended use, risk register, threat model, SBOM                                                                                               | ⬜     | C20–C22                                                                                                                                        |
-| 8 — Release              | v0.1.0                                                                                                                                        | ⬜     | C23                                                                                                                                            |
+| Phase                    | Ships                                                                                                                                         | Status | Commits                                                                                                                                                                                                      |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1 — Foundations          | toolchain, guardrails, docs harness — foundation commit — application code intentionally starts at C1; see [docs/ROADMAP.md](docs/ROADMAP.md) | ✅     | [C0](https://github.com/sebkoo/maekbeat/commits/main)                                                                                                                                                        |
+| 2 — Contract & simulator | zod schemas, vitals-sim, golden tests, architecture doc                                                                                       | ✅     | [C1 protocol](https://github.com/sebkoo/maekbeat/commit/63be391) · [C2 vitals-sim](https://github.com/sebkoo/maekbeat/commit/01b9007) · [C3 goldens](https://github.com/sebkoo/maekbeat/commit/6ba9c91) · C4 |
+| 3 — Server               | Fastify, WS ingest, alert engine, tests, coverage gate                                                                                        | ⬜     | C5–C9                                                                                                                                                                                                        |
+| 4 — Web                  | React scaffold, live chart, timeline + ack, tests                                                                                             | ⬜     | C10–C13                                                                                                                                                                                                      |
+| 5 — iOS                  | SwiftUI, CoreBluetooth, notifications, XCTest                                                                                                 | ⬜     | C14–C17                                                                                                                                                                                                      |
+| 6 — Infra & operations   | Docker + compose, OTel, CDK synth-in-CI, k6                                                                                                   | ⬜     | C18–C19                                                                                                                                                                                                      |
+| 7 — Depth                | intended use, risk register, threat model, SBOM                                                                                               | ⬜     | C20–C22                                                                                                                                                                                                      |
+| 8 — Release              | v0.1.0                                                                                                                                        | ⬜     | C23                                                                                                                                                                                                          |
 
 Updated in the same commit as every scope change. A commit cannot link itself, so each shipped commit's SHA chip is backfilled by the next commit that touches the board — the one-commit lag is by design.
 
