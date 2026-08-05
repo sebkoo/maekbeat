@@ -1,0 +1,105 @@
+# Maekbeat
+
+**Pronounced "Mac-beat."** From _maek_ (맥), the Korean word for one's pulse.
+
+Wearable-to-caregiver vitals pipeline, end to end: synthetic BLE vitals → SwiftUI iOS app → Node.js/TypeScript API → AWS → live React caregiver dashboard.
+
+[![CI](https://github.com/sebkoo/maekbeat/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sebkoo/maekbeat/actions/workflows/ci.yml) [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![Node ≥22](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](.nvmrc) [![Swift 5.10+](https://img.shields.io/badge/swift-5.10%2B-orange)](docs/ROADMAP.md) [![Not a medical device](https://img.shields.io/badge/not_a_medical_device-red)](DISCLAIMER.md)
+
+**Maekbeat is an educational portfolio project, not a medical device, and uses synthetic data only — see [DISCLAIMER.md](DISCLAIMER.md).**
+Out of scope: real medical algorithms · real BLE hardware · protected health information · clinical validation.
+
+<details>
+<summary>Not an engineer? The 60-second version</summary>
+
+Imagine a bracelet that counts heartbeats while someone sleeps. Maekbeat is every pipe planned between that bracelet and the family's screen: a fake bracelet (software, planned as packages/vitals-sim), a phone app that listens to it, a cloud that stores the numbers, a webpage where a caregiver watches them, and a nudge when the numbers look strange. The bracelet is imaginary, the numbers are invented, and the pipes are being built in the open — the Status board below shows what exists today.
+
+</details>
+
+## Architecture
+
+```mermaid
+flowchart LR
+  SIM["packages/vitals-sim"] -->|"BLE GATT"| IOS["apps/ios"]
+  IOS -->|"WebSocket"| API["apps/server API"]
+  API --> Q["queue"]
+  Q --> S3["S3 archive"]
+  Q --> FAN["Lambda fan-out"]
+  FAN --> ALERT["caregiver alert"]
+  API -->|"live stream"| WEB["apps/web dashboard"]
+```
+
+The full design, with latency budgets and failure modes, lands in docs/ARCHITECTURE.md at C4.
+
+## Design notes
+
+| Topic                                    | Where                                                              | Status            |
+| ---------------------------------------- | ------------------------------------------------------------------ | ----------------- |
+| BLE→cloud pipeline design                | docs/ARCHITECTURE.md scaling chain + failure modes                 | C4 (planned)      |
+| Alert validation without patient data    | synthetic scenarios + golden tests; apps/server tests              | C3, C8 (planned)  |
+| Scaling model and load evidence          | target architecture + k6 results                                   | C4, C19 (planned) |
+| Production monitoring                    | OpenTelemetry + dashboards-as-code                                 | C18 (planned)     |
+| Health-data security posture             | [SECURITY.md](SECURITY.md) (today) · docs/security/threat-model.md | C22 (planned)     |
+| iOS background execution + BLE lifecycle | apps/ios BLE state machine + background notes                      | C15 (planned)     |
+| Tooling choices and trade-offs           | [docs/DECISIONS.md](docs/DECISIONS.md) (9 entries today)           | C0 ✅             |
+| Process auditability                     | ADRs in docs/adr · PR template + CI hygiene job in .github         | C0 ✅             |
+
+Engineers: start at docs/ARCHITECTURE.md · the why: [docs/DECISIONS.md](docs/DECISIONS.md) · the plan: [docs/ROADMAP.md](docs/ROADMAP.md).
+
+## Quickstart
+
+```sh
+git clone https://github.com/sebkoo/maekbeat.git && cd maekbeat && ./scripts/bootstrap.sh
+```
+
+[scripts/bootstrap.sh](scripts/bootstrap.sh) verifies the toolchain and activates the .githooks. Runnable pipeline lands at C5 — follow the board.
+
+## Repository tour
+
+```text
+apps/        ios · server · web — planned, C5–C17
+packages/    protocol (shared types + zod schemas) — planned, C1
+             vitals-sim (synthetic HR/SpO2/respiration/motion) — planned, C2
+infra/       AWS CDK stacks — planned, C19
+docs/        adr · ai · ROADMAP.md · DECISIONS.md
+.githooks/   pre-commit formatting + trailer checks
+.github/     CI workflows · PR template
+scripts/     bootstrap + hygiene checks
+```
+
+## Status
+
+| Phase                    | Ships                                                                                                                                         | Status | Commits                                               |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ----------------------------------------------------- |
+| 1 — Foundations          | toolchain, guardrails, docs harness — foundation commit — application code intentionally starts at C1; see [docs/ROADMAP.md](docs/ROADMAP.md) | ✅     | [C0](https://github.com/sebkoo/maekbeat/commits/main) |
+| 2 — Contract & simulator | zod schemas, vitals-sim, golden tests, architecture doc                                                                                       | ⬜     | C1–C4                                                 |
+| 3 — Server               | Fastify, WS ingest, alert engine, tests, coverage gate                                                                                        | ⬜     | C5–C9                                                 |
+| 4 — Web                  | React scaffold, live chart, timeline + ack, tests                                                                                             | ⬜     | C10–C13                                               |
+| 5 — iOS                  | SwiftUI, CoreBluetooth, notifications, XCTest                                                                                                 | ⬜     | C14–C17                                               |
+| 6 — Infra & operations   | Docker + compose, OTel, CDK synth-in-CI, k6                                                                                                   | ⬜     | C18–C19                                               |
+| 7 — Depth                | intended use, risk register, threat model, SBOM                                                                                               | ⬜     | C20–C22                                               |
+| 8 — Release              | v0.1.0                                                                                                                                        | ⬜     | C23                                                   |
+
+Updated in the same commit as every scope change.
+
+## Stack
+
+| Layer   | Tools                                                 | Status                                                           |
+| ------- | ----------------------------------------------------- | ---------------------------------------------------------------- |
+| iOS     | Swift 5.10+, SwiftUI, CoreBluetooth                   | planned, C14–C17                                                 |
+| Web     | React 19, Vite, TypeScript                            | planned, C10–C13                                                 |
+| Server  | Node 22, TypeScript, Fastify, WebSocket               | planned, C5–C9                                                   |
+| Infra   | AWS CDK: S3, Lambda, ECR, ECS/EC2; Docker             | planned, C18–C19                                                 |
+| Quality | prettier + markdownlint via .githooks, CI hygiene job | live today, [.github/workflows/ci.yml](.github/workflows/ci.yml) |
+
+## Why I'm building this
+
+SUDEP kills roughly 1 in 1,000 people with epilepsy per year, mostly unwitnessed during sleep ([CDC](https://www.cdc.gov/epilepsy/sudep/index.html), [Epilepsy Foundation](https://www.epilepsy.com/complications-risks/early-death-sudep)). Companies like Neurava build wearables against exactly this risk. I'm an iOS engineer building that entire class of system — device to dashboard — in public, properly; [docs/ROADMAP.md](docs/ROADMAP.md) is the path there.
+
+## How this is built
+
+Built with an AI-assisted workflow under human review — every diff is read, run, and revised before it lands. Process and tooling in [docs/ai/AI_USAGE.md](docs/ai/AI_USAGE.md).
+
+---
+
+The plan: [docs/ROADMAP.md](docs/ROADMAP.md) · contributing: [CONTRIBUTING.md](CONTRIBUTING.md) (good-first-issues arrive at C23) · license: [Apache-2.0](LICENSE).

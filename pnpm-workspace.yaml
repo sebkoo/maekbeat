@@ -1,0 +1,5 @@
+# Future workspace globs; first package lands at C1.
+packages:
+  - apps/*
+  - packages/*
+  - infra

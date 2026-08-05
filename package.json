@@ -1,0 +1,15 @@
+{
+  "name": "maekbeat",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Synthetic wearable vitals to caregiver dashboard — educational, not a medical device",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.10.0",
+  "scripts": {
+    "format:check": "npx --yes prettier@3.9.6 --check --ignore-unknown .",
+    "lint:md": "npx --yes markdownlint-cli2@0.23.2 \"**/*.md\" \"#node_modules\""
+  }
+}

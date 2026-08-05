@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Proves every commit message in history is free of banned AI-attribution trailers (guardrail G1).
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: bash scripts/check-commit-hygiene.sh
+
+  # Proves the repository docs pass the same prettier and markdownlint gates the pre-commit hook enforces.
+  docs-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npx --yes prettier@3.9.6 --check --ignore-unknown .
+      - run: npx --yes markdownlint-cli2@0.23.2 "**/*.md" "#node_modules"

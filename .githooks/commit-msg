@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Guardrail G1: reject commit messages that carry AI-attribution trailers.
+# Receives the commit message file path as $1 (standard commit-msg contract).
+set -u
+
+msg_file="$1"
+
+if grep -qiE 'co-authored-by:|claude-session|noreply@anthropic|generated with claude' "$msg_file"; then
+  echo "commit-msg: banned AI-attribution trailer found (matches: co-authored-by:|claude-session|noreply@anthropic|generated with claude)." >&2
+  echo "AI disclosure lives in docs/ai/AI_USAGE.md, not in git metadata." >&2
+  exit 1
+fi
+
+exit 0

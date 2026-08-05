@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Formatting gate: prettier --check on all staged files, markdownlint on staged *.md.
+# First run downloads the pinned tools (~10 s); npx caches them after that.
+set -u
+
+# Rev-less form on purpose: "git diff --cached HEAD" fails on an unborn branch (zero commits).
+staged=()
+while IFS= read -r -d '' f; do
+  staged+=("$f")
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+if [ "${#staged[@]}" -eq 0 ]; then
+  exit 0
+fi
+
+if ! npx --yes prettier@3.9.6 --check --ignore-unknown "${staged[@]}"; then
+  echo "pre-commit: prettier check failed on staged files." >&2
+  echo "run: npx --yes prettier@3.9.6 --write --ignore-unknown <files>" >&2
+  exit 1
+fi
+
+md_files=()
+for f in "${staged[@]}"; do
+  case "$f" in
+    *.md) md_files+=("$f") ;;
+  esac
+done
+
+if [ "${#md_files[@]}" -gt 0 ]; then
+  if ! npx --yes markdownlint-cli2@0.23.2 "${md_files[@]}"; then
+    echo "pre-commit: markdownlint failed on staged Markdown files." >&2
+    exit 1
+  fi
+fi
+
+exit 0

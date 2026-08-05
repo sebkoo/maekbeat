@@ -1,0 +1,12 @@
+{
+  // Rule config only; file globs live in CI and hook invocations, not here.
+  "default": true,
+  // No hard line-length limit for prose.
+  "MD013": false,
+  // Allow a small set of inline HTML elements.
+  "MD033": {
+    "allowed_elements": ["details", "summary", "img", "a", "br", "sub", "sup"],
+  },
+  // Allow emphasis used as a caption.
+  "MD036": false,
+}
