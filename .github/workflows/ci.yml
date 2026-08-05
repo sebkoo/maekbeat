@@ -19,6 +19,8 @@ jobs:
       - run: bash scripts/check-commit-hygiene.sh
 
   # Proves the workspace packages pass their vitest suites and typechecks (first package: C1).
+  # Since C9 the suites run once, coverage-enabled: each package's vitest.config.ts
+  # thresholds sit just under its measured floor, so a coverage regression fails this job.
   tests:
     runs-on: ubuntu-latest
     env:
@@ -30,8 +32,27 @@ jobs:
           node-version: 22
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -r test
+      # pnpm -r silently skips packages without the script, so a package could
+      # drop out of the gate with green CI. Assert every workspace package
+      # carries test:coverage before running it (CLAUDE.md ratchet policy).
+      - run: |
+          missing=$(git grep -L '"test:coverage"' -- 'apps/*/package.json' 'packages/*/package.json' || true)
+          if [ -n "$missing" ]; then
+            echo "packages missing the test:coverage gate: $missing"
+            exit 1
+          fi
+      - run: pnpm -r test:coverage
       - run: pnpm -r typecheck
+      # Badge #6 data source: the upload feeds the README Codecov badge, which
+      # renders the last uploaded number and shows "unknown" when none exists.
+      # fail_ci_if_error keeps a silent upload failure from leaving the badge
+      # quietly stale. The token secret is optional for a public repository;
+      # setting CODECOV_TOKEN removes tokenless-upload rate limits.
+      - uses: codecov/codecov-action@v5
+        with:
+          files: apps/server/coverage/lcov.info,packages/protocol/coverage/lcov.info,packages/vitals-sim/coverage/lcov.info
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   # Proves the repository docs pass the same prettier and markdownlint gates the pre-commit hook enforces.
   docs-lint:

@@ -12,6 +12,7 @@
     "format:check": "npx --yes prettier@3.9.6 --check --ignore-unknown .",
     "lint:md": "npx --yes markdownlint-cli2@0.23.2 \"**/*.md\" \"#**/node_modules\"",
     "test": "pnpm -r test",
+    "test:coverage": "pnpm -r test:coverage",
     "typecheck": "pnpm -r typecheck"
   }
 }

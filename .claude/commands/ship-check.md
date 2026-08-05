@@ -29,7 +29,7 @@ Pre-ship checklist. Run every step; fix findings before committing.
    grep -riEn "FDA[- ](ready|compliant)" --exclude-dir=.git --exclude-dir=.claude --exclude-dir=node_modules --exclude=CLAUDE.md .
    ```
 
-5. README badge count — 5 today, hard cap 7:
+5. README badge count — 6 today (coverage joined at C9), hard cap 7:
 
    ```sh
    grep -o '!\[' README.md | wc -l

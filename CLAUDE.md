@@ -76,5 +76,12 @@ Rules for every AI session in this repo. They are not suggestions.
 
 - README progress board is updated in the same commit as every scope
   change. `docs/ROADMAP.md` is the plan of record.
+- Coverage thresholds (each package's `vitest.config.ts`) are a ratchet:
+  they move only up, each raise its own deliberate commit, and they are
+  never overridden downward by CLI flags in package scripts or CI. The
+  denominator is never shrunk — no new exclude entries, no narrowed
+  include globs, no relocating runtime code out of `src/`. Every
+  workspace package defines `test:coverage` (CI enforces the presence);
+  a new package joins the gate in its scaffold commit.
 - An adversarial review pass closes each phase.
 - Tests are never weakened to make an implementation pass.

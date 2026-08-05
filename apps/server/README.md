@@ -1,6 +1,6 @@
 # @maekbeat/server
 
-The Maekbeat API server, C5–C8 of [docs/ROADMAP.md](../../docs/ROADMAP.md): WebSocket vitals ingest validated against [@maekbeat/protocol](../../packages/protocol), a bounded per-device ring buffer, a sliding-window alert engine, and REST reads — all in the OpenAPI document. Dashboard fan-out lands at C11.
+The Maekbeat API server, C5–C9 of [docs/ROADMAP.md](../../docs/ROADMAP.md): WebSocket vitals ingest validated against [@maekbeat/protocol](../../packages/protocol), a bounded per-device ring buffer, a sliding-window alert engine, and REST reads — all in the OpenAPI document. Dashboard fan-out lands at C11.
 
 ## Run it
 
@@ -8,7 +8,7 @@ The Maekbeat API server, C5–C8 of [docs/ROADMAP.md](../../docs/ROADMAP.md): We
 pnpm --filter @maekbeat/server demo   # first runnable pipeline: sim -> WS -> buffer -> REST
 pnpm --filter @maekbeat/server dev    # tsx watch src/main.ts
 pnpm --filter @maekbeat/server test
-pnpm --filter @maekbeat/server test:coverage   # v8 coverage report (gate lands at C9)
+pnpm --filter @maekbeat/server test:coverage   # v8 coverage + threshold gate (in CI since C9)
 pnpm --filter @maekbeat/server typecheck
 ```
 
@@ -70,7 +70,7 @@ One row per test file, mapping it to the behaviors it pins — the file-to-behav
 | [src/reads.test.ts](src/reads.test.ts)                     | REST read ordering, since/limit, 404 shape, wire-contract drift guards                                                     |
 | [src/openapi.test.ts](src/openapi.test.ts)                 | exact route surface in the OpenAPI document, Swagger UI mounted in development only                                        |
 
-Coverage is measured with `pnpm --filter @maekbeat/server test:coverage` ([vitest.config.ts](vitest.config.ts), v8 provider, all of src/ minus tests in the denominator — including the uncovered process entry [src/main.ts](src/main.ts)). The number is reported in the C8 commit body; the CI gate that ratchets it lands at C9.
+Coverage is measured with `pnpm --filter @maekbeat/server test:coverage` ([vitest.config.ts](vitest.config.ts), v8 provider, all of src/ minus tests in the denominator — including the uncovered process entry [src/main.ts](src/main.ts); the one file outside the gate is the demo wiring, [scripts/demo.ts](scripts/demo.ts)). Since C9 the config carries thresholds set just under the measured floor, and the CI tests job runs the coverage-enabled suite, so a regression fails the build. Thresholds are a ratchet — they move only up, never down, never via new exclusions or narrowed globs (policy: [CLAUDE.md](../../CLAUDE.md)).
 
 ## Configuration
 

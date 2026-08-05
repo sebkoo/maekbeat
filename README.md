@@ -4,7 +4,7 @@
 
 Wearable-to-caregiver vitals pipeline, end to end: synthetic BLE vitals → SwiftUI iOS app → Node.js/TypeScript API → AWS → live React caregiver dashboard.
 
-[![CI](https://github.com/sebkoo/maekbeat/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sebkoo/maekbeat/actions/workflows/ci.yml) [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![Node ≥22](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](.nvmrc) [![Swift 5.10+](https://img.shields.io/badge/swift-5.10%2B-orange)](docs/ROADMAP.md) [![Not a medical device](https://img.shields.io/badge/not_a_medical_device-red)](DISCLAIMER.md)
+[![CI](https://github.com/sebkoo/maekbeat/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/sebkoo/maekbeat/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/sebkoo/maekbeat/branch/main/graph/badge.svg)](https://app.codecov.io/gh/sebkoo/maekbeat) [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![Node ≥22](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](.nvmrc) [![Swift 5.10+](https://img.shields.io/badge/swift-5.10%2B-orange)](docs/ROADMAP.md) [![Not a medical device](https://img.shields.io/badge/not_a_medical_device-red)](DISCLAIMER.md)
 
 **Maekbeat is an educational portfolio project, not a medical device, and uses synthetic data only — see [DISCLAIMER.md](DISCLAIMER.md).**
 Out of scope: real medical algorithms · real BLE hardware · protected health information · clinical validation.
@@ -57,7 +57,7 @@ git clone https://github.com/sebkoo/maekbeat.git && cd maekbeat && ./scripts/boo
 ## Repository tour
 
 ```text
-apps/        server (WS ingest · ring buffer · alert engine · REST reads · tests — C5–C8) · web, ios — planned, C10–C17
+apps/        server (WS ingest · ring buffer · alert engine · REST reads · tests + coverage gate — C5–C9) · web, ios — planned, C10–C17
 packages/    protocol (shared vitals contract: types + zod schemas)
              vitals-sim (deterministic synthetic vitals: rest, motion, anomaly)
 infra/       AWS CDK stacks — planned, C19
@@ -73,7 +73,7 @@ scripts/     bootstrap + hygiene checks
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 1 — Foundations          | toolchain, guardrails, docs harness — foundation commit — application code intentionally starts at C1; see [docs/ROADMAP.md](docs/ROADMAP.md) | ✅     | [C0](https://github.com/sebkoo/maekbeat/commits/main)                                                                                                                                                                                                                          |
 | 2 — Contract & simulator | zod schemas, vitals-sim, golden tests, architecture doc                                                                                       | ✅     | [C1 protocol](https://github.com/sebkoo/maekbeat/commit/63be391) · [C2 vitals-sim](https://github.com/sebkoo/maekbeat/commit/01b9007) · [C3 goldens](https://github.com/sebkoo/maekbeat/commit/6ba9c91) · [C4 architecture](https://github.com/sebkoo/maekbeat/commit/aa568a5) |
-| 3 — Server               | Fastify, WS ingest, alert engine, tests, coverage gate                                                                                        | 🔄     | [C5 skeleton](https://github.com/sebkoo/maekbeat/commit/d352705) · [C6 ingest](https://github.com/sebkoo/maekbeat/commit/0170638) · [C7 alerts](https://github.com/sebkoo/maekbeat/commit/2a1d563) · C8 tests · C9                                                             |
+| 3 — Server               | Fastify, WS ingest, alert engine, tests, coverage gate                                                                                        | ✅     | [C5 skeleton](https://github.com/sebkoo/maekbeat/commit/d352705) · [C6 ingest](https://github.com/sebkoo/maekbeat/commit/0170638) · [C7 alerts](https://github.com/sebkoo/maekbeat/commit/2a1d563) · [C8 tests](https://github.com/sebkoo/maekbeat/commit/2356a62) · C9 gate   |
 | 4 — Web                  | React scaffold, live chart, timeline + ack, tests                                                                                             | ⬜     | C10–C13                                                                                                                                                                                                                                                                        |
 | 5 — iOS                  | SwiftUI, CoreBluetooth, notifications, XCTest                                                                                                 | ⬜     | C14–C17                                                                                                                                                                                                                                                                        |
 | 6 — Infra & operations   | Docker + compose, OTel, CDK synth-in-CI, k6                                                                                                   | ⬜     | C18–C19                                                                                                                                                                                                                                                                        |
@@ -84,13 +84,13 @@ Updated in the same commit as every scope change. A commit cannot link itself, s
 
 ## Stack
 
-| Layer   | Tools                                                               | Status                                                                                                    |
-| ------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| iOS     | Swift 5.10+, SwiftUI, CoreBluetooth                                 | planned, C14–C17                                                                                          |
-| Web     | React 19, Vite, TypeScript                                          | planned, C10–C13                                                                                          |
-| Server  | Node 22, TypeScript, Fastify, WebSocket                             | ingest + alerts + reads + test suite live ([apps/server](apps/server), C5–C8) · coverage gate planned, C9 |
-| Infra   | AWS CDK: S3, Lambda, ECR, ECS/EC2; Docker                           | planned, C18–C19                                                                                          |
-| Quality | prettier + markdownlint via .githooks; CI hygiene + workspace tests | live today, [.github/workflows/ci.yml](.github/workflows/ci.yml)                                          |
+| Layer   | Tools                                                               | Status                                                                                   |
+| ------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| iOS     | Swift 5.10+, SwiftUI, CoreBluetooth                                 | planned, C14–C17                                                                         |
+| Web     | React 19, Vite, TypeScript                                          | planned, C10–C13                                                                         |
+| Server  | Node 22, TypeScript, Fastify, WebSocket                             | ingest + alerts + reads + tests + coverage gate live ([apps/server](apps/server), C5–C9) |
+| Infra   | AWS CDK: S3, Lambda, ECR, ECS/EC2; Docker                           | planned, C18–C19                                                                         |
+| Quality | prettier + markdownlint via .githooks; CI hygiene + workspace tests | live today, [.github/workflows/ci.yml](.github/workflows/ci.yml)                         |
 
 ## Why I'm building this
 
