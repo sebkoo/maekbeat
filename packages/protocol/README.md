@@ -53,6 +53,20 @@ Notes on the contract:
   heart-rate measurements are reported; `spo2Pct` and `respirationRpm` allow
   fractional resolution; `motion` is unitless, normalized to 0–1.
 
+## Alert event (since C7)
+
+`alertEventSchema` (src/alerts.ts) is the first live exercise of the evolution
+policy: an additive type — new schema export, vitals frame untouched, `v` stays
+`1`. It carries one alert through its lifecycle: `alertId` (stable across
+states — the C12 acknowledgement handle), `deviceId`, `metric`, `direction`,
+`state` (`raised` → `ongoing` → `resolved`), `raisedAtMs`/`resolvedAtMs`, and
+`windowStats` over the judging window.
+
+Timestamps on alert events are server receive time, never device clock —
+the clock policy fixed in docs/ARCHITECTURE.md (drift shifts charts, never
+alerts). Like the vitals frame, the schema is strict: unknown keys are
+rejected.
+
 ## Commands
 
 ```sh

@@ -2,6 +2,7 @@ import { vitalsFrameSchema } from "@maekbeat/protocol";
 import type { FastifyPluginAsync } from "fastify";
 import type { RawData } from "ws";
 
+import type { AlertEngine } from "./alerts";
 import type { VitalsStore } from "./store";
 
 /**
@@ -20,6 +21,7 @@ export interface IngestCounters {
 
 export interface IngestPluginOptions {
   store: VitalsStore;
+  engine: AlertEngine;
   counters: IngestCounters;
 }
 
@@ -36,7 +38,7 @@ function rawDataToString(data: RawData): string {
  * socket — one bad frame must not sever a stream carrying good ones.
  */
 export const ingestPlugin: FastifyPluginAsync<IngestPluginOptions> = async (app, opts) => {
-  const { store, counters } = opts;
+  const { store, engine, counters } = opts;
 
   app.route({
     method: "GET",
@@ -110,6 +112,20 @@ export const ingestPlugin: FastifyPluginAsync<IngestPluginOptions> = async (app,
             }),
           );
           return;
+        }
+
+        // Deduped frames never reach the engine — a retransmit cannot
+        // re-count toward a window that already saw the value.
+        const transitions = engine.process({
+          ...frame,
+          receivedAtMs,
+          sessionEpoch: result.sessionEpoch,
+        });
+        for (const transition of transitions) {
+          request.log.info(
+            { alertId: transition.alertId, state: transition.state, metric: transition.metric },
+            "alert transition",
+          );
         }
 
         socket.send(

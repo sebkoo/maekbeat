@@ -140,6 +140,29 @@ describe("WS ingest", () => {
     });
   });
 
+  it("feeds accepted frames to the alert engine: WS breaches raise over REST", async () => {
+    const { socket } = await startAppWithSocket();
+    // 5 breaching frames inside the 15 s window raise spo2-low; the duplicate
+    // in the middle must NOT count twice (deduped before the engine).
+    for (const [seq, spo2Pct] of [
+      [0, 85],
+      [1, 85],
+      [2, 85],
+      [2, 85],
+      [3, 85],
+    ] as const) {
+      await sendAndAwaitReply(socket, JSON.stringify(frame({ seq, spo2Pct })));
+    }
+    let listing = await app?.inject({ method: "GET", url: "/devices/ws-dev/alerts" });
+    expect(listing?.json<{ counters: { raised: number } }>().counters.raised).toBe(0);
+
+    await sendAndAwaitReply(socket, JSON.stringify(frame({ seq: 4, spo2Pct: 85 })));
+    listing = await app?.inject({ method: "GET", url: "/devices/ws-dev/alerts" });
+    const body = listing?.json<{ counters: { raised: number }; alerts: { state: string }[] }>();
+    expect(body?.counters.raised).toBe(1);
+    expect(body?.alerts[0]?.state).toBe("raised");
+  });
+
   it("answers plain HTTP on /ingest with 426", async () => {
     app = await buildApp(loadConfig({ NODE_ENV: "test", LOG_LEVEL: "silent" }));
     const response = await app.inject({ method: "GET", url: "/ingest" });

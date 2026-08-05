@@ -1,10 +1,12 @@
 import type { FastifyPluginAsync } from "fastify";
 
+import type { AlertEngine } from "./alerts";
 import type { IngestCounters } from "./ingest";
 import type { VitalsStore } from "./store";
 
 export interface ReadsPluginOptions {
   store: VitalsStore;
+  engine: AlertEngine;
   counters: IngestCounters;
 }
 
@@ -43,6 +45,35 @@ const storedFrameJsonSchema = {
   },
 } as const;
 
+// Mirrors @maekbeat/protocol alertEventSchema; the drift test in
+// reads.test.ts pins the field sets against each other.
+const alertEventJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["alertId", "deviceId", "metric", "direction", "state", "raisedAtMs", "windowStats"],
+  properties: {
+    alertId: { type: "string" },
+    deviceId: { type: "string" },
+    metric: { type: "string", enum: ["heartRateBpm", "spo2Pct", "respirationRpm"] },
+    direction: { type: "string", enum: ["low", "high"] },
+    state: { type: "string", enum: ["raised", "ongoing", "resolved"] },
+    raisedAtMs: { type: "integer", description: "server clock — receive time, never device clock" },
+    resolvedAtMs: { type: "integer" },
+    windowStats: {
+      type: "object",
+      additionalProperties: false,
+      required: ["windowMs", "sampleCount", "breachCount", "minValue", "maxValue"],
+      properties: {
+        windowMs: { type: "integer" },
+        sampleCount: { type: "integer" },
+        breachCount: { type: "integer" },
+        minValue: { type: "number" },
+        maxValue: { type: "number" },
+      },
+    },
+  },
+} as const;
+
 const notFoundJsonSchema = {
   type: "object",
   additionalProperties: false,
@@ -55,7 +86,7 @@ const notFoundJsonSchema = {
 
 /** REST reads over the ring buffer: device listing + per-device frames. */
 export const readsPlugin: FastifyPluginAsync<ReadsPluginOptions> = async (app, opts) => {
-  const { store, counters } = opts;
+  const { store, engine, counters } = opts;
 
   app.get(
     "/devices",
@@ -182,6 +213,63 @@ export const readsPlugin: FastifyPluginAsync<ReadsPluginOptions> = async (app, o
         return reply.status(404).send({ statusCode: 404, message: `unknown device: ${deviceId}` });
       }
       return { deviceId, count: frames.length, frames };
+    },
+  );
+
+  app.get<{ Params: { deviceId: string } }>(
+    "/devices/:deviceId/alerts",
+    {
+      schema: {
+        summary: "Read alerts for one device",
+        description:
+          "Alert lifecycle records from the sliding-window engine " +
+          "(apps/server/src/alerts.ts), oldest first, capped at 100 per device. " +
+          "Counters are process-lifetime per device — raised/resolved/suppressed " +
+          "are the C23 product-loop metrics. Thresholds are demo heuristics for a " +
+          "notification demo of the kind used in monitoring research, not " +
+          "clinical rules.",
+        params: {
+          type: "object",
+          additionalProperties: false,
+          required: ["deviceId"],
+          properties: { deviceId: { type: "string", minLength: 1, maxLength: 64 } },
+        },
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: false,
+            required: ["deviceId", "counters", "alerts"],
+            properties: {
+              deviceId: { type: "string" },
+              counters: {
+                type: "object",
+                additionalProperties: false,
+                required: ["raised", "resolved", "suppressed"],
+                properties: {
+                  raised: { type: "integer" },
+                  resolved: { type: "integer" },
+                  suppressed: { type: "integer" },
+                },
+              },
+              alerts: { type: "array", items: alertEventJsonSchema },
+            },
+          },
+          404: notFoundJsonSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const { deviceId } = request.params;
+      // 404 keys on the store: a device the server has never ingested is
+      // unknown; a known device without alerts gets an empty list.
+      if (store.readFrames(deviceId, { limit: 1 }) === undefined) {
+        return reply.status(404).send({ statusCode: 404, message: `unknown device: ${deviceId}` });
+      }
+      return {
+        deviceId,
+        counters: engine.countersFor(deviceId),
+        alerts: engine.listAlerts(deviceId),
+      };
     },
   );
 };

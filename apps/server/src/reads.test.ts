@@ -1,4 +1,4 @@
-import { vitalsFrameSchema, type VitalsFrame } from "@maekbeat/protocol";
+import { alertEventSchema, vitalsFrameSchema, type VitalsFrame } from "@maekbeat/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApp } from "./app";
@@ -113,5 +113,62 @@ describe("GET /devices/:deviceId/frames", () => {
       url: "/devices/rest-dev/frames?limit=0",
     });
     expect(response.statusCode).toBe(400);
+  });
+});
+
+describe("GET /devices/:deviceId/alerts", () => {
+  it("returns empty alerts and zero counters for a known, quiet device", async () => {
+    const server = await seededApp();
+    const response = await server.inject({ method: "GET", url: "/devices/rest-dev/alerts" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      deviceId: "rest-dev",
+      counters: { raised: 0, resolved: 0, suppressed: 0 },
+      alerts: [],
+    });
+  });
+
+  it("404s an unknown device", async () => {
+    const server = await seededApp();
+    const response = await server.inject({ method: "GET", url: "/devices/nobody/alerts" });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("serves the full lifecycle record; fields track the protocol schema", async () => {
+    const server = await seededApp();
+    // Drive the engine directly with injected receive times: 5 breaches to
+    // raise, 8 recoveries to resolve (DEFAULT_ALERT_RULES spo2-low).
+    let tick = 0;
+    for (const spo2Pct of [85, 85, 85, 85, 85, 96, 96, 96, 96, 96, 96, 96, 96]) {
+      server.alertEngine.process({
+        ...frame({ seq: tick, capturedAtMs: 1_000 + tick, spo2Pct }),
+        receivedAtMs: 500_000 + tick * 1_000,
+        sessionEpoch: 1,
+      });
+      tick += 1;
+    }
+
+    const response = await server.inject({ method: "GET", url: "/devices/rest-dev/alerts" });
+    const body = response.json<{
+      counters: Record<string, number>;
+      alerts: Record<string, unknown>[];
+    }>();
+    expect(body.counters).toEqual({ raised: 1, resolved: 1, suppressed: 0 });
+    expect(body.alerts).toHaveLength(1);
+    expect(body.alerts[0]).toMatchObject({
+      deviceId: "rest-dev",
+      metric: "spo2Pct",
+      direction: "low",
+      state: "resolved",
+      raisedAtMs: 504_000,
+      resolvedAtMs: 512_000,
+    });
+
+    // Drift guard: the REST alert must expose exactly the protocol's
+    // alertEventSchema fields, so a contract change breaks here.
+    expect(Object.keys(body.alerts[0] ?? {}).sort()).toEqual(
+      Object.keys(alertEventSchema.shape).sort(),
+    );
+    expect(alertEventSchema.safeParse(body.alerts[0]).success).toBe(true);
   });
 });

@@ -3,6 +3,7 @@ import fastifySwaggerUi from "@fastify/swagger-ui";
 import fastifyWebsocket from "@fastify/websocket";
 import { fastify } from "fastify";
 
+import { AlertEngine, DEFAULT_ALERT_RULES, type AlertRuleConfig } from "./alerts";
 import type { ServerConfig } from "./config";
 import { INGEST_MAX_PAYLOAD_BYTES, ingestPlugin, type IngestCounters } from "./ingest";
 import { readsPlugin } from "./reads";
@@ -12,10 +13,16 @@ import { packageVersion } from "./version";
 declare module "fastify" {
   interface FastifyInstance {
     vitalsStore: VitalsStore;
+    alertEngine: AlertEngine;
   }
 }
 
-export async function buildApp(config: ServerConfig) {
+export interface BuildAppOptions {
+  /** Override the alert rule set; defaults to DEFAULT_ALERT_RULES. */
+  alertRules?: readonly AlertRuleConfig[];
+}
+
+export async function buildApp(config: ServerConfig, options: BuildAppOptions = {}) {
   const app = fastify({
     logger: { level: config.LOG_LEVEL },
   });
@@ -42,8 +49,9 @@ export async function buildApp(config: ServerConfig) {
       info: {
         title: "Maekbeat server API",
         description:
-          "Vitals ingest and reads: WebSocket /ingest, /devices listing, per-device " +
-          "frame reads, /healthz. The sliding-window alert engine lands at C7 (docs/ROADMAP.md).",
+          "Vitals ingest, sliding-window alert lifecycle, and reads: WebSocket /ingest, " +
+          "/devices listing, per-device frame and alert reads, /healthz. Dashboard " +
+          "fan-out lands at C11 (docs/ROADMAP.md).",
         version: packageVersion,
       },
     },
@@ -55,12 +63,14 @@ export async function buildApp(config: ServerConfig) {
   }
 
   const store = new VitalsStore(config.RING_CAPACITY);
+  const engine = new AlertEngine(options.alertRules ?? DEFAULT_ALERT_RULES);
   const counters: IngestCounters = { received: 0, rejectedInvalid: 0 };
   app.decorate("vitalsStore", store);
+  app.decorate("alertEngine", engine);
 
   await app.register(fastifyWebsocket, { options: { maxPayload: INGEST_MAX_PAYLOAD_BYTES } });
-  await app.register(ingestPlugin, { store, counters });
-  await app.register(readsPlugin, { store, counters });
+  await app.register(ingestPlugin, { store, engine, counters });
+  await app.register(readsPlugin, { store, engine, counters });
 
   app.get(
     "/healthz",

@@ -4,16 +4,23 @@ import { buildApp } from "./app";
 import { loadConfig } from "./config";
 import { packageVersion } from "./version";
 
-const EXPECTED_PATHS = ["/devices", "/devices/{deviceId}/frames", "/healthz", "/ingest"];
+const EXPECTED_PATHS = [
+  "/devices",
+  "/devices/{deviceId}/alerts",
+  "/devices/{deviceId}/frames",
+  "/healthz",
+  "/ingest",
+];
 
 describe("OpenAPI document", () => {
-  it("lists exactly the C6 route surface", async () => {
+  it("lists exactly the current route surface", async () => {
     const app = await buildApp(loadConfig({ NODE_ENV: "test", LOG_LEVEL: "silent" }));
     await app.ready();
 
     const doc = app.swagger();
     expect(Object.keys(doc.paths ?? {}).sort()).toEqual(EXPECTED_PATHS);
     expect(doc.info.description).toContain("/ingest");
+    expect(doc.info.description).toContain("alert");
     expect(doc.info.version).toBe(packageVersion);
     expect("openapi" in doc && doc.openapi).toMatch(/^3\./);
 

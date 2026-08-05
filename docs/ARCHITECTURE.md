@@ -4,7 +4,7 @@ Maekbeat's scaling chain, stage by stage, with the failure modes each stage must
 
 ## What exists today
 
-Two packages are real: [packages/protocol](../packages/protocol) — the wire contract, a strict zod `vitalsFrameSchema` with transport-validity bounds and the `frameKey` identity — and [packages/vitals-sim](../packages/vitals-sim), a deterministic synthetic vitals generator whose exact output is golden-pinned in packages/vitals-sim/golden/. Since C6 the server in [apps/server](../apps/server) is real as well: WebSocket ingest validating every frame, the in-process ring buffer, and REST reads — the runnable pipeline apps/server/scripts/demo.ts drives end to end. Stages downstream of the buffer (alert engine, dashboard, notification) stay planned and carry their commit numbers in the table below.
+Two packages are real: [packages/protocol](../packages/protocol) — the wire contract, a strict zod `vitalsFrameSchema` plus the additive `alertEventSchema` (C7) — and [packages/vitals-sim](../packages/vitals-sim), a deterministic synthetic vitals generator whose exact output is golden-pinned in packages/vitals-sim/golden/. The server in [apps/server](../apps/server) is real through stage 5: WebSocket ingest validating every frame (C6), the in-process ring buffer (C6), and the sliding-window alert engine (C7) — the runnable pipeline apps/server/scripts/demo.ts drives frames to a raised-and-resolved alert end to end. Stages downstream (dashboard fan-out, notification) stay planned and carry their commit numbers in the table below.
 
 ## Scaling chain
 
@@ -25,7 +25,7 @@ flowchart LR
 | 2   | iOS gateway            | simulator transport in-app  | CoreBluetooth central, background streaming                        | planned — C14–C15                                                                                   |
 | 3   | WebSocket ingestion    | Fastify WS endpoint         | same, horizontally scaled                                          | dev form shipped — C6 (apps/server/src/ingest.ts); scaling — C19                                    |
 | 4   | Event queue            | in-process ring buffer      | SQS                                                                | ring buffer shipped — C6 (apps/server/src/store.ts); SQS is target architecture, no commit assigned |
-| 5   | Stream processor       | sliding-window alert engine | same, consuming SQS                                                | planned — C7                                                                                        |
+| 5   | Stream processor       | sliding-window alert engine | same, consuming SQS                                                | dev form shipped — C7 (apps/server/src/alerts.ts); SQS consumption is target                        |
 | 6   | Storage                | ring-buffer window only     | S3 raw archive + time-series read model                            | ring-buffer window shipped — C6; S3 + time-series — C19                                             |
 | 7   | Dashboard fan-out      | WS push to apps/web         | Lambda fan-out                                                     | planned — C11, C19                                                                                  |
 | 8   | Caregiver notification | iOS notification            | same, triggered via fan-out                                        | planned — C16, C19                                                                                  |
@@ -50,7 +50,7 @@ sequenceDiagram
   P->>C: notify (under 5 s end-to-end TARGET)
 ```
 
-The ingest legs are real since C6 — the receivedAtMs stamp and session-scoped dedupe in apps/server/src/ingest.ts and store.ts, with the ring buffer as the enqueue target — while gateway transport (C14–C15), dashboard fan-out (C11), and notification (C16) remain unbuilt. Both TARGETs are end-to-end paths, defined precisely in the budget table below, not budgets for the single leg they annotate.
+The ingest and processing legs are real since C6–C7 — receivedAtMs stamp and session-scoped dedupe (apps/server/src/ingest.ts, store.ts), the ring buffer as enqueue target, and the alert engine judging each accepted frame (apps/server/src/alerts.ts) — while gateway transport (C14–C15), dashboard fan-out (C11), and notification (C16) remain unbuilt. Both TARGETs are end-to-end paths, defined precisely in the budget table below, not budgets for the single leg they annotate.
 
 ## Latency budgets — all TARGETS
 
@@ -66,8 +66,8 @@ Neither number has been measured; both are budget targets per [ROADMAP.md](ROADM
 | Failure mode              | Owning stage(s)           | Mechanism                                                | Status                                                    |
 | ------------------------- | ------------------------- | -------------------------------------------------------- | --------------------------------------------------------- |
 | duplicate packets         | ingest (3)                | `frameKey` dedupe                                        | shipped — C6 (apps/server/src/store.ts, session-scoped)   |
-| delayed / out-of-order    | ingest (3), processor (5) | identity never by time; order by (capturedAtMs, seq)     | read ordering shipped — C6; alert windows — C7            |
-| clock drift               | ingest (3), processor (5) | `receivedAtMs − capturedAtMs` delta; server-time windows | stamping shipped — C6; alert windows — C7                 |
+| delayed / out-of-order    | ingest (3), processor (5) | identity never by time; order by (capturedAtMs, seq)     | shipped — C6 (read ordering), C7 (receive-time windows)   |
+| clock drift               | ingest (3), processor (5) | `receivedAtMs − capturedAtMs` delta; server-time windows | shipped — C6 (stamping), C7 (windows on receive time)     |
 | device disconnect         | ingest (3), gateway (2)   | staleness signal; BLE state machine                      | lastReceivedAtMs shipped — C6; rendering — C11; BLE — C15 |
 | offline buffering, replay | gateway (2)               | on-device buffer, replay in seq order, idempotent        | dedupe shipped — C6 (windowed); gateway buffer — C15      |
 
@@ -79,11 +79,11 @@ Frame identity is `frameKey` = (deviceId, seq), shipped in [packages/protocol/sr
 
 ### Delayed and out-of-order packets
 
-A frame's identity never depends on when it arrives — `frameKey` excludes timestamps by design (packages/protocol/README.md). Ordering is (`capturedAtMs`, `seq`): the ring buffer stores frames in arrival order and REST reads sort at query time (apps/server/src/store.ts), so a late arrival inside the 64-frame reorder window is accepted once and lands in capture order. The C7 sliding window must likewise accept late frames inside its window; that part is still planned.
+A frame's identity never depends on when it arrives — `frameKey` excludes timestamps by design (packages/protocol/README.md). Ordering is (`capturedAtMs`, `seq`): the ring buffer stores frames in arrival order and REST reads sort at query time (apps/server/src/store.ts), so a late arrival inside the 64-frame reorder window is accepted once and lands in capture order. The C7 sliding window (apps/server/src/alerts.ts) counts every accepted frame at its receive time — a late frame inside the window still contributes, and the dedupe upstream guarantees it contributes once.
 
 ### Clock drift
 
-The wire carries one timestamp, `capturedAtMs`, from the device clock, deliberately without a contract-level freshness bound ([packages/protocol/src/vitals.ts](../packages/protocol/src/vitals.ts)). The handling this document fixed now runs: the server stamps `receivedAtMs` per frame at ingest ([apps/server/src/ingest.ts](../apps/server/src/ingest.ts)) and stores it beside the frame, the `receivedAtMs − capturedAtMs` delta is the drift signal, and the C7 alert windows will evaluate on server receive time — a drifting device clock can shift a chart, never an alert. `frameKey` excludes both timestamps, so drift cannot change a frame's identity.
+The wire carries one timestamp, `capturedAtMs`, from the device clock, deliberately without a contract-level freshness bound ([packages/protocol/src/vitals.ts](../packages/protocol/src/vitals.ts)). The handling this document fixed now runs end to end: the server stamps `receivedAtMs` per frame at ingest ([apps/server/src/ingest.ts](../apps/server/src/ingest.ts)), the `receivedAtMs − capturedAtMs` delta is the drift signal, and the alert windows evaluate on server receive time ([apps/server/src/alerts.ts](../apps/server/src/alerts.ts), no clock inside the engine) — a drifting device clock can shift a chart, never an alert. `frameKey` excludes both timestamps, so drift cannot change a frame's identity.
 
 ### Device disconnect
 
