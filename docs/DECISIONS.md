@@ -61,3 +61,9 @@ Decision: vitals-sim approximates gaussian noise as a rescaled sum of three unif
 Alternatives: Box–Muller or ziggurat transforms; a seeded normal-distribution library.  
 Trade-offs: A coarser normal — hard ±3 bound, blunter tails — in exchange for arithmetic that is bit-exact under IEEE 754, where Box–Muller's Math.log/Math.cos may round differently per engine.  
 Why now: C3 pins byte-identical golden fixtures (packages/vitals-sim/golden/), and that only holds cross-engine if generation never touches engine-dependent math.
+
+**11. Seq regression starts a new device session**  
+Decision: Ingest dedupe is scoped to (deviceId, sessionEpoch, seq): a `seq` more than SEQ_REORDER_WINDOW (64, apps/server/src/store.ts) below the session's high-water mark starts a new server-side session; regressions inside the window dedupe as retransmits or late arrivals.  
+Alternatives: A wire-level boot/session id (a protocol `v` bump); connection-scoped sessions; treating any regression as a new session.  
+Trade-offs: A reboot before `seq` exceeds the window is absorbed as duplicates, and any pre-reboot frame arriving after the new session starts is mislabeled into it — possibly re-storing an old frame and forking a further session (limits recorded in packages/protocol/README.md) — in exchange the wire stays v1 and out-of-order arrivals inside the window survive, where connection-scoped sessions would break C15 reconnect-replay idempotency and any-regression would misread every late packet as a reboot.  
+Why now: C6 ingest must handle replays and reboots today, the caveat has been on the record in packages/protocol/README.md since C1, and C15's reconnect design needs the rule fixed before the gateway exists.

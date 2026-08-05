@@ -9,6 +9,7 @@ describe("loadConfig", () => {
       HOST: "127.0.0.1",
       PORT: 3000,
       LOG_LEVEL: "info",
+      RING_CAPACITY: 1024,
     });
   });
 
@@ -19,12 +20,14 @@ describe("loadConfig", () => {
         HOST: "0.0.0.0",
         PORT: "8080",
         LOG_LEVEL: "debug",
+        RING_CAPACITY: "512",
       }),
     ).toEqual({
       NODE_ENV: "production",
       HOST: "0.0.0.0",
       PORT: 8080,
       LOG_LEVEL: "debug",
+      RING_CAPACITY: 512,
     });
   });
 
@@ -40,6 +43,8 @@ describe("loadConfig", () => {
     ["PORT", "70000"],
     ["PORT", "3000.5"],
     ["HOST", "   "],
+    ["RING_CAPACITY", "0"],
+    ["RING_CAPACITY", "not-a-number"],
     ["LOG_LEVEL", "loud"],
     ["NODE_ENV", "staging"],
   ])("rejects invalid %s=%s and names the variable in the error", (key, value) => {

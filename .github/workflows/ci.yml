@@ -7,13 +7,15 @@ on:
     branches: [main]
 
 jobs:
-  # Proves every commit message in history is free of banned AI-attribution trailers (guardrail G1).
+  # Proves every commit message in history is trailer-free (G1) and Conventional-Commit
+  # formed (G2), and that the commit-msg hook itself still enforces both.
   hygiene:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - run: bash scripts/test-githooks.sh
       - run: bash scripts/check-commit-hygiene.sh
 
   # Proves the workspace packages pass their vitest suites and typechecks (first package: C1).

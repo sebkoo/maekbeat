@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Guardrail G1: reject commit messages that carry AI-attribution trailers.
+# Guardrail G2: enforce Conventional Commit subject form, <=72 characters.
 # Receives the commit message file path as $1 (standard commit-msg contract).
 set -u
 
@@ -8,6 +9,20 @@ msg_file="$1"
 if grep -qiE 'co-authored-by:|claude-session|noreply@anthropic|generated with claude' "$msg_file"; then
   echo "commit-msg: banned AI-attribution trailer found (matches: co-authored-by:|claude-session|noreply@anthropic|generated with claude)." >&2
   echo "AI disclosure lives in docs/ai/AI_USAGE.md, not in git metadata." >&2
+  exit 1
+fi
+
+subject="$(head -n 1 "$msg_file")"
+
+if [ "${#subject}" -gt 72 ]; then
+  echo "commit-msg: subject is ${#subject} characters; the limit is 72." >&2
+  exit 1
+fi
+
+if ! printf '%s' "$subject" | grep -qE '^(feat|fix|docs|test|chore|ci|refactor|perf|build)(\([a-z0-9-]+\))?!?: .+'; then
+  echo "commit-msg: subject must match Conventional Commits 1.0.0:" >&2
+  echo "  ^(feat|fix|docs|test|chore|ci|refactor|perf|build)(\\([a-z0-9-]+\\))?!?: .+" >&2
+  echo "  got: ${subject}" >&2
   exit 1
 fi
 

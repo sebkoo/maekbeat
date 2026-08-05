@@ -10,6 +10,8 @@ const envSchema = z.object({
   HOST: z.string().trim().min(1).default("127.0.0.1"),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
+  /** Max frames retained per device in the ring buffer (oldest arrival evicted). */
+  RING_CAPACITY: z.coerce.number().int().min(1).max(65536).default(1024),
 });
 
 export type ServerConfig = z.infer<typeof envSchema>;

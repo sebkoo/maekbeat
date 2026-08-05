@@ -1,9 +1,19 @@
 import fastifySwagger from "@fastify/swagger";
 import fastifySwaggerUi from "@fastify/swagger-ui";
+import fastifyWebsocket from "@fastify/websocket";
 import { fastify } from "fastify";
 
 import type { ServerConfig } from "./config";
+import { INGEST_MAX_PAYLOAD_BYTES, ingestPlugin, type IngestCounters } from "./ingest";
+import { readsPlugin } from "./reads";
+import { VitalsStore } from "./store";
 import { packageVersion } from "./version";
+
+declare module "fastify" {
+  interface FastifyInstance {
+    vitalsStore: VitalsStore;
+  }
+}
 
 export async function buildApp(config: ServerConfig) {
   const app = fastify({
@@ -32,7 +42,8 @@ export async function buildApp(config: ServerConfig) {
       info: {
         title: "Maekbeat server API",
         description:
-          "C5 skeleton: /healthz only. WebSocket ingest and REST reads land at C6 (docs/ROADMAP.md).",
+          "Vitals ingest and reads: WebSocket /ingest, /devices listing, per-device " +
+          "frame reads, /healthz. The sliding-window alert engine lands at C7 (docs/ROADMAP.md).",
         version: packageVersion,
       },
     },
@@ -42,6 +53,14 @@ export async function buildApp(config: ServerConfig) {
   if (config.NODE_ENV === "development") {
     await app.register(fastifySwaggerUi, { routePrefix: "/docs" });
   }
+
+  const store = new VitalsStore(config.RING_CAPACITY);
+  const counters: IngestCounters = { received: 0, rejectedInvalid: 0 };
+  app.decorate("vitalsStore", store);
+
+  await app.register(fastifyWebsocket, { options: { maxPayload: INGEST_MAX_PAYLOAD_BYTES } });
+  await app.register(ingestPlugin, { store, counters });
+  await app.register(readsPlugin, { store, counters });
 
   app.get(
     "/healthz",

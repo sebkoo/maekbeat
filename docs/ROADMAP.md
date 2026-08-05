@@ -19,8 +19,8 @@ Commits are ordered by dependency, not by calendar, and independent commits may 
 
 ## Phase 3 — Server (in progress)
 
-- C5 — feat(server): Fastify skeleton, /healthz, OpenAPI, CI wiring — shipped: typed env config (zod defaults + .env.example), pino logging, central error handler masking 5xx outside development, graceful SIGTERM/SIGINT shutdown, and an OpenAPI document currently listing exactly /healthz; the existing pnpm -r CI job picks the package up unchanged; sha chip backfills at C6.
-- C6 — feat(server): WebSocket ingest + ring-buffer store + REST reads. Decides the dedupe scope for device reboots (`seq` reset to 0): session/boot id vs treating `seq` regression as a new session — caveat recorded in packages/protocol/README.md.
+- C5 — feat(server): Fastify skeleton, /healthz, OpenAPI, CI wiring — shipped [d352705](https://github.com/sebkoo/maekbeat/commit/d352705): typed env config (zod defaults + .env.example), pino logging, central error handler masking 5xx outside development, graceful SIGTERM/SIGINT shutdown, and an OpenAPI document then listing exactly /healthz; the existing pnpm -r CI job picks the package up unchanged.
+- C6 — feat(server): WebSocket ingest + ring-buffer store + REST reads — shipped: every inbound frame validated against vitalsFrameSchema (structured reject, socket stays open), server-side receivedAtMs stamped and stored per frame, the reboot-dedupe decision resolved as session epochs on seq regression past a 64-frame reorder window (docs/DECISIONS.md #11), bounded per-device ring buffer read-ordered by (capturedAtMs, seq), /devices + per-device frame reads in the OpenAPI doc, the first runnable pipeline (apps/server/scripts/demo.ts), and Conventional Commit enforcement in .githooks/commit-msg + CI; sha chip backfills at C7.
 - C7 — feat(server): sliding-window alert engine.
 - C8 — test(server): unit + integration suite.
 - C9 — ci: coverage gate; the coverage badge unlocks here (badge #6).
