@@ -58,7 +58,7 @@ git clone https://github.com/sebkoo/maekbeat.git && cd maekbeat && ./scripts/boo
 
 ```text
 apps/        ios · server · web — planned, C5–C17
-packages/    protocol (shared types + zod schemas) — planned, C1
+packages/    protocol (shared vitals contract: types + zod schemas)
              vitals-sim (synthetic HR/SpO2/respiration/motion) — planned, C2
 infra/       AWS CDK stacks — planned, C19
 docs/        adr · ai · ROADMAP.md · DECISIONS.md
@@ -72,7 +72,7 @@ scripts/     bootstrap + hygiene checks
 | Phase                    | Ships                                                                                                                                         | Status | Commits                                               |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ----------------------------------------------------- |
 | 1 — Foundations          | toolchain, guardrails, docs harness — foundation commit — application code intentionally starts at C1; see [docs/ROADMAP.md](docs/ROADMAP.md) | ✅     | [C0](https://github.com/sebkoo/maekbeat/commits/main) |
-| 2 — Contract & simulator | zod schemas, vitals-sim, golden tests, architecture doc                                                                                       | ⬜     | C1–C4                                                 |
+| 2 — Contract & simulator | zod schemas, vitals-sim, golden tests, architecture doc                                                                                       | 🔄     | C1–C4                                                 |
 | 3 — Server               | Fastify, WS ingest, alert engine, tests, coverage gate                                                                                        | ⬜     | C5–C9                                                 |
 | 4 — Web                  | React scaffold, live chart, timeline + ack, tests                                                                                             | ⬜     | C10–C13                                               |
 | 5 — iOS                  | SwiftUI, CoreBluetooth, notifications, XCTest                                                                                                 | ⬜     | C14–C17                                               |
@@ -84,13 +84,13 @@ Updated in the same commit as every scope change.
 
 ## Stack
 
-| Layer   | Tools                                                 | Status                                                           |
-| ------- | ----------------------------------------------------- | ---------------------------------------------------------------- |
-| iOS     | Swift 5.10+, SwiftUI, CoreBluetooth                   | planned, C14–C17                                                 |
-| Web     | React 19, Vite, TypeScript                            | planned, C10–C13                                                 |
-| Server  | Node 22, TypeScript, Fastify, WebSocket               | planned, C5–C9                                                   |
-| Infra   | AWS CDK: S3, Lambda, ECR, ECS/EC2; Docker             | planned, C18–C19                                                 |
-| Quality | prettier + markdownlint via .githooks, CI hygiene job | live today, [.github/workflows/ci.yml](.github/workflows/ci.yml) |
+| Layer   | Tools                                                               | Status                                                           |
+| ------- | ------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| iOS     | Swift 5.10+, SwiftUI, CoreBluetooth                                 | planned, C14–C17                                                 |
+| Web     | React 19, Vite, TypeScript                                          | planned, C10–C13                                                 |
+| Server  | Node 22, TypeScript, Fastify, WebSocket                             | planned, C5–C9                                                   |
+| Infra   | AWS CDK: S3, Lambda, ECR, ECS/EC2; Docker                           | planned, C18–C19                                                 |
+| Quality | prettier + markdownlint via .githooks; CI hygiene + workspace tests | live today, [.github/workflows/ci.yml](.github/workflows/ci.yml) |
 
 ## Why I'm building this
 

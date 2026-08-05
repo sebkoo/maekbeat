@@ -30,7 +30,7 @@ in the prettier line to fix findings):
 
 ```sh
 npx --yes prettier@3.9.6 --check --ignore-unknown .
-npx --yes markdownlint-cli2@0.23.2 "**/*.md" "#node_modules"
+npx --yes markdownlint-cli2@0.23.2 "**/*.md" "#**/node_modules"
 ```
 
 ## Pull requests

@@ -28,9 +28,9 @@ if [ "$node_major" -lt 22 ]; then
   exit 1
 fi
 
-# pnpm is optional for now: the first workspace package lands at C1.
+# pnpm is required for workspace tests since C1; hooks and docs gates work without it.
 if ! command -v pnpm >/dev/null 2>&1; then
-  echo "bootstrap: warning — pnpm not found. Optional today; the first workspace package lands at C1. Hint: corepack enable pnpm"
+  echo "bootstrap: warning — pnpm not found. Needed for workspace tests and typechecks (pnpm -r test). Hint: corepack enable pnpm"
 fi
 
 if ! git config core.hooksPath .githooks; then

@@ -16,6 +16,21 @@ jobs:
           fetch-depth: 0
       - run: bash scripts/check-commit-hygiene.sh
 
+  # Proves the workspace packages pass their vitest suites and typechecks (first package: C1).
+  tests:
+    runs-on: ubuntu-latest
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r test
+      - run: pnpm -r typecheck
+
   # Proves the repository docs pass the same prettier and markdownlint gates the pre-commit hook enforces.
   docs-lint:
     runs-on: ubuntu-latest
@@ -25,4 +40,4 @@ jobs:
         with:
           node-version: 22
       - run: npx --yes prettier@3.9.6 --check --ignore-unknown .
-      - run: npx --yes markdownlint-cli2@0.23.2 "**/*.md" "#node_modules"
+      - run: npx --yes markdownlint-cli2@0.23.2 "**/*.md" "#**/node_modules"

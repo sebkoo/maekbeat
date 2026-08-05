@@ -1,4 +1,4 @@
-# Future workspace globs; first package lands at C1.
+# packages/* is live (protocol — C1); apps/* and infra are future globs.
 packages:
   - apps/*
   - packages/*

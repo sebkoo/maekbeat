@@ -10,9 +10,9 @@ Commits are ordered by dependency, not by calendar, and independent commits may 
 
 - C0 — chore: repo bootstrap (this commit — shipped). Config, hooks, CI, and the docs set including this file.
 
-## Phase 2 — Contract & simulator (planned)
+## Phase 2 — Contract & simulator (in progress)
 
-- C1 — feat(protocol): shared types + zod schemas in packages/protocol.
+- C1 — feat(protocol): shared types + zod schemas in packages/protocol; workspace test + typecheck CI job (shipped).
 - C2 — feat(vitals-sim): synthetic HR/SpO2/respiration/motion generator with rest, motion, and anomaly scenarios.
 - C3 — test(vitals-sim): golden-file scenario tests.
 - C4 — docs: ARCHITECTURE.md with mermaid diagrams and latency budgets (frame→dashboard under 2 s, alert fan-out under 5 s — all labeled targets until C19 measures them). Scaling chain: BLE device (sim) → iOS gateway → WebSocket ingestion → event queue (in-process ring buffer in dev; SQS in the target architecture) → stream processor (alert engine) → storage (S3 raw archive; time-series considerations) → dashboard fan-out + caregiver notification. Each stage must answer for five failure modes: device disconnect, duplicate packets, delayed or out-of-order packets, clock drift, and offline buffering with replay.
@@ -20,7 +20,7 @@ Commits are ordered by dependency, not by calendar, and independent commits may 
 ## Phase 3 — Server (planned)
 
 - C5 — feat(server): Fastify skeleton, /healthz, OpenAPI, CI wiring.
-- C6 — feat(server): WebSocket ingest + ring-buffer store + REST reads.
+- C6 — feat(server): WebSocket ingest + ring-buffer store + REST reads. Decides the dedupe scope for device reboots (`seq` reset to 0): session/boot id vs treating `seq` regression as a new session — caveat recorded in packages/protocol/README.md.
 - C7 — feat(server): sliding-window alert engine.
 - C8 — test(server): unit + integration suite.
 - C9 — ci: coverage gate; the coverage badge unlocks here (badge #6).

@@ -10,6 +10,8 @@
   "packageManager": "pnpm@11.10.0",
   "scripts": {
     "format:check": "npx --yes prettier@3.9.6 --check --ignore-unknown .",
-    "lint:md": "npx --yes markdownlint-cli2@0.23.2 \"**/*.md\" \"#node_modules\""
+    "lint:md": "npx --yes markdownlint-cli2@0.23.2 \"**/*.md\" \"#**/node_modules\"",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
   }
 }
