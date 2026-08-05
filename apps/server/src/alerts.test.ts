@@ -250,20 +250,25 @@ function runScenario(options: SimOptions, count: number, rules = DEFAULT_ALERT_R
   return { engine, events };
 }
 
+// Silence as a property: the C7 review swept 10 seeds by hand; this makes the
+// sweep permanent. 10 seeds x 300 frames x 2 quiet scenarios is the CI-priced
+// standing claim that rest and motion never alert under DEFAULT_ALERT_RULES.
+const SILENCE_SEEDS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
+
 // Transition ticks below are golden-style pins: deterministic products of the
 // seeded simulator + DEFAULT_ALERT_RULES, recorded from a verified run. A
 // change to either moves them, and this suite is the tripwire.
 describe("AlertEngine against vitals-sim scenarios", () => {
-  it("rest fires ZERO alerts — the false-alarm baseline is first-class", () => {
-    for (const seed of [1, 42]) {
+  it("rest fires ZERO alerts across the seed sweep — the false-alarm baseline is first-class", () => {
+    for (const seed of SILENCE_SEEDS) {
       const { engine, events } = runScenario({ scenario: "rest", seed }, 300);
       expect(events).toHaveLength(0);
       expect(engine.stats).toEqual({ raised: 0, resolved: 0, suppressed: 0 });
     }
   });
 
-  it("motion fires ZERO alerts despite HR excursions and read noise", () => {
-    for (const seed of [1, 42]) {
+  it("motion fires ZERO alerts across the seed sweep despite HR excursions and read noise", () => {
+    for (const seed of SILENCE_SEEDS) {
       const { engine, events } = runScenario({ scenario: "motion", seed }, 300);
       expect(events).toHaveLength(0);
       expect(engine.stats).toEqual({ raised: 0, resolved: 0, suppressed: 0 });

@@ -1,6 +1,6 @@
 # @maekbeat/server
 
-The Maekbeat API server, C5–C7 of [docs/ROADMAP.md](../../docs/ROADMAP.md): WebSocket vitals ingest validated against [@maekbeat/protocol](../../packages/protocol), a bounded per-device ring buffer, a sliding-window alert engine, and REST reads — all in the OpenAPI document. Dashboard fan-out lands at C11.
+The Maekbeat API server, C5–C8 of [docs/ROADMAP.md](../../docs/ROADMAP.md): WebSocket vitals ingest validated against [@maekbeat/protocol](../../packages/protocol), a bounded per-device ring buffer, a sliding-window alert engine, and REST reads — all in the OpenAPI document. Dashboard fan-out lands at C11.
 
 ## Run it
 
@@ -8,6 +8,7 @@ The Maekbeat API server, C5–C7 of [docs/ROADMAP.md](../../docs/ROADMAP.md): We
 pnpm --filter @maekbeat/server demo   # first runnable pipeline: sim -> WS -> buffer -> REST
 pnpm --filter @maekbeat/server dev    # tsx watch src/main.ts
 pnpm --filter @maekbeat/server test
+pnpm --filter @maekbeat/server test:coverage   # v8 coverage report (gate lands at C9)
 pnpm --filter @maekbeat/server typecheck
 ```
 
@@ -49,6 +50,27 @@ The store ([src/store.ts](src/store.ts)) keeps at most `RING_CAPACITY` frames pe
 - `GET /devices/:deviceId/frames?since&limit` — frames from the window; `since` is an inclusive `capturedAtMs` bound, `limit` defaults to 100 (max 1000). Unknown device: 404.
 - `GET /devices/:deviceId/alerts` — alert lifecycle records + counters (see [src/reads.ts](src/reads.ts)); the alert shape mirrors `alertEventSchema` from [@maekbeat/protocol](../../packages/protocol), pinned by a drift test.
 - `GET /healthz` — status, uptime, version. Swagger UI at `/docs` when `NODE_ENV=development`; [src/openapi.test.ts](src/openapi.test.ts) pins the exact route list.
+
+## Test map
+
+One row per test file, mapping it to the behaviors it pins — the file-to-behavior half of the C20 traceability story, wired before requirement IDs exist. Property suites run on fixed seeds with fixed iteration counts, so CI is deterministic; the review attacks from C6 and C7 live on here as regression tests, not as one-off session artifacts.
+
+| File                                                       | Pins                                                                                                                       |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| [src/config.test.ts](src/config.test.ts)                   | env defaults and overrides; invalid values rejected with the variable named                                                |
+| [src/app.test.ts](src/app.test.ts)                         | /healthz body and version; central error handler masks 5xx outside development, passes 4xx through                         |
+| [src/store.test.ts](src/store.test.ts)                     | dedupe identity, reorder-window edges, reboot epochs, eviction, read ordering                                              |
+| [src/store.property.test.ts](src/store.property.test.ts)   | seeded seq-pattern attacks vs a docs/DECISIONS.md #11 oracle — 5 seeds × 400 rounds × 2 devices × 2 capacities             |
+| [src/alerts.test.ts](src/alerts.test.ts)                   | lifecycle, hysteresis, cooldown latch, monotonic window clock, golden transition ticks, 10-seed silence sweep              |
+| [src/alerts.property.test.ts](src/alerts.property.test.ts) | clock-regression fuzz (10 seeds × 400 frames): alternation, timestamp order, monotonicized-clock equivalence; frozen clock |
+| [src/ingest.test.ts](src/ingest.test.ts)                   | per-message WS replies, reject-never-closes, dedupe-before-engine seam, HTTP 426, close 1009                               |
+| [src/failures.test.ts](src/failures.test.ts)               | mid-stream drop then reconnect (same epoch resumes), malformed burst continuation, post-1009 state intact                  |
+| [src/isolation.test.ts](src/isolation.test.ts)             | parallel sockets with interleaved devices: no window, session, or counter bleed across devices                             |
+| [src/journey.test.ts](src/journey.test.ts)                 | vitals-sim → WS client → ingest → engine → REST anomaly journey, DEFAULT_ALERT_RULES unscaled                              |
+| [src/reads.test.ts](src/reads.test.ts)                     | REST read ordering, since/limit, 404 shape, wire-contract drift guards                                                     |
+| [src/openapi.test.ts](src/openapi.test.ts)                 | exact route surface in the OpenAPI document, Swagger UI mounted in development only                                        |
+
+Coverage is measured with `pnpm --filter @maekbeat/server test:coverage` ([vitest.config.ts](vitest.config.ts), v8 provider, all of src/ minus tests in the denominator — including the uncovered process entry [src/main.ts](src/main.ts)). The number is reported in the C8 commit body; the CI gate that ratchets it lands at C9.
 
 ## Configuration
 
