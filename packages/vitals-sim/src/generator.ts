@@ -24,6 +24,10 @@ export interface SimOptions {
   anomaly?: Partial<AnomalyOptions>;
 }
 
+// Bumped whenever any change alters the bytes emitted for a given (seed, options).
+// Golden fixture headers record it, so a stale fixture fails loudly instead of drifting.
+export const GENERATOR_VERSION = 1;
+
 export const SIM_DEFAULTS = {
   deviceId: "sim-001",
   // 2025-08-04T00:00:00Z — an arbitrary fixed epoch so default runs are reproducible.

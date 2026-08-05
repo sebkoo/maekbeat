@@ -55,3 +55,9 @@ Decision: Single harness commit C0.
 Alternatives: Splitting config, docs, and CI into separate commits.  
 Trade-offs: One heavier first diff to review, instead of small reviewable steps.  
 Why now: Hooks, CI, and settings implement one rule together; they only work as a whole, and packing them into C0 keeps every later commit pure feature evidence.
+
+**10. Irwin–Hall noise over Box–Muller**  
+Decision: vitals-sim approximates gaussian noise as a rescaled sum of three uniforms (packages/vitals-sim/src/prng.ts).  
+Alternatives: Box–Muller or ziggurat transforms; a seeded normal-distribution library.  
+Trade-offs: A coarser normal — hard ±3 bound, blunter tails — in exchange for arithmetic that is bit-exact under IEEE 754, where Box–Muller's Math.log/Math.cos may round differently per engine.  
+Why now: C3 pins byte-identical golden fixtures (packages/vitals-sim/golden/), and that only holds cross-engine if generation never touches engine-dependent math.

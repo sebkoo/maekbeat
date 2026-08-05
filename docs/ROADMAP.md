@@ -12,9 +12,9 @@ Commits are ordered by dependency, not by calendar, and independent commits may 
 
 ## Phase 2 — Contract & simulator (in progress)
 
-- C1 — feat(protocol): shared types + zod schemas in packages/protocol; workspace test + typecheck CI job (shipped).
-- C2 — feat(vitals-sim): synthetic HR/SpO2/respiration/motion generator with rest, motion, and anomaly scenarios (shipped).
-- C3 — test(vitals-sim): golden-file scenario tests.
+- C1 — feat(protocol): shared types + zod schemas in packages/protocol — shipped [63be391](https://github.com/sebkoo/maekbeat/commit/63be391): strict vitals frame schema with transport-validity bounds, the `frameKey` dedupe identity, and the workspace test + typecheck CI job pulled forward from the C5 plan.
+- C2 — feat(vitals-sim): synthetic HR/SpO2/respiration/motion generator with rest, motion, and anomaly scenarios — shipped [01b9007](https://github.com/sebkoo/maekbeat/commit/01b9007): Irwin–Hall noise for cross-engine byte determinism, HR read noise coupled to motion amplitude, and an enforced spo2LagTicks ≥ 1 desaturation-lag invariant.
+- C3 — test(vitals-sim): golden-file scenario tests (shipped).
 - C4 — docs: ARCHITECTURE.md with mermaid diagrams and latency budgets (frame→dashboard under 2 s, alert fan-out under 5 s — all labeled targets until C19 measures them). Scaling chain: BLE device (sim) → iOS gateway → WebSocket ingestion → event queue (in-process ring buffer in dev; SQS in the target architecture) → stream processor (alert engine) → storage (S3 raw archive; time-series considerations) → dashboard fan-out + caregiver notification. Each stage must answer for five failure modes: device disconnect, duplicate packets, delayed or out-of-order packets, clock drift, and offline buffering with replay.
 
 ## Phase 3 — Server (planned)

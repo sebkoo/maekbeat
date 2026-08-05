@@ -10,12 +10,14 @@
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "golden:update": "UPDATE_GOLDENS=1 vitest run"
   },
   "dependencies": {
     "@maekbeat/protocol": "workspace:*"
   },
   "devDependencies": {
+    "@types/node": "^22.20.1",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   }

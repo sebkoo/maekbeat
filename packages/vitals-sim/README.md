@@ -6,7 +6,7 @@ The scenario shapes below are plausibility heuristics for a demo, not clinical m
 
 ## Determinism
 
-Same options and seed → byte-identical frame sequence, verified across runs by `src/generator.test.ts`; the cross-platform half of the guarantee rests on the three rules below and gets pinned as a regression gate by the C3 golden files (planned — docs/ROADMAP.md). The rules, in `src/prng.ts` and `src/generator.ts`:
+Same options and seed → byte-identical frame sequence, verified across runs by `src/generator.test.ts`; the cross-platform half of the guarantee rests on the three rules below and is pinned as a regression gate by the golden fixtures in `golden/` — an engine that produced different bytes would fail `src/golden.test.ts`. The rules, in `src/prng.ts` and `src/generator.ts`:
 
 - The only randomness source is mulberry32, a pure 32-bit PRNG seeded from `seed`; `Math.random` is never consulted.
 - Time is simulated, never read: `capturedAtMs = startAtMs + seq * tickMs`, with `startAtMs` defaulting to a fixed constant — `Date.now` appears nowhere in generation.
@@ -66,6 +66,18 @@ for (const frame of generateVitals({ scenario: "rest", seed: 7 })) {
 ```
 
 `SimOptions` also accepts `deviceId`, `startAtMs`, `tickMs`, and `anomaly` overrides — see `src/generator.ts` for the validation rules on each.
+
+## Golden files
+
+`golden/` holds one NDJSON fixture per scenario: a header line `{seed, config, generatorVersion}` followed by 120 frames, one JSON object per line, regenerable byte-for-byte from the header alone. `src/golden.test.ts` puts four gates on each fixture: byte equality against a fresh generation, structure (trailing newline, frame count), regeneration from the header alone, and `vitalsFrameSchema` validation of every line. The statistical shape gates (lag-1 autocorrelation, onset/recovery asymmetry) stay in `src/generator.test.ts`: goldens pin bytes, stats pin shape.
+
+Serialization is `JSON.stringify` only, with key order fixed at construction — ECMAScript specifies number-to-string conversion exactly, so equal values produce equal bytes on every engine. Regenerate with:
+
+```sh
+pnpm -F @maekbeat/vitals-sim golden:update
+```
+
+Policy: a golden diff IS a generator-contract change — intentional, explained in the commit body, with `GENERATOR_VERSION` bumped when generation semantics change, and never made to silence a failing test (the loop contract in docs/ai/AI_USAGE.md). Know the mechanics: `golden:update` rewrites the fixtures and then compares against what it just wrote, so its byte gates pass by construction — a green update run is not evidence of correctness. The evidence is the reviewed `git diff` of `golden/`, backed by the statistical and boundary gates the update run also executes.
 
 ## Commands
 
