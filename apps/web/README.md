@@ -1,0 +1,84 @@
+# @maekbeat/web
+
+The caregiver dashboard, C10 of [docs/ROADMAP.md](../../docs/ROADMAP.md): a React 19 + Vite + TypeScript scaffold, the design tokens the rest of Phase 4 draws from, and a typed client for the [apps/server](../server) read surface. Each route reads once over REST when it mounts; the live WebSocket stream and the vitals chart land at C11.
+
+## Run it
+
+```sh
+pnpm --filter @maekbeat/web dev             # vite dev server on :5173
+pnpm --filter @maekbeat/web test
+pnpm --filter @maekbeat/web test:coverage   # v8 coverage + threshold gate (joined the CI gate at C10)
+pnpm --filter @maekbeat/web typecheck
+pnpm --filter @maekbeat/web build           # static bundle in dist/
+```
+
+Point the dashboard at a server with `VITE_API_BASE_URL` ([.env.example](.env.example)); it defaults to `http://127.0.0.1:3000`. The server alone ingests nothing, so `pnpm --filter @maekbeat/server dev` in a second shell gives the honest empty state; add `pnpm --filter @maekbeat/server demo` in a third and the device list fills from the ring buffer that run drives.
+
+## Third consumer of the wire contract
+
+apps/web imports [@maekbeat/protocol](../../packages/protocol) directly, after [packages/vitals-sim](../../packages/vitals-sim) (C2) and [apps/server](../server) (C6), and before the iOS app mirrors it in Swift (planned — C14). Frames and alert events are parsed with the shared schemas themselves in [src/api/contracts.ts](src/api/contracts.ts), so a server that drifts from the contract fails the read here instead of painting a wrong number.
+
+Strictness splits on purpose. Frames and alert events stay strict — an unknown key means a corrupted payload and a real change bumps the protocol version — while the listing and page envelopes around them are permissive, so an added server counter cannot blank a caregiver's screen.
+
+## Design tokens
+
+Every colour, space, size, and radius lives in [src/styles/tokens.css](src/styles/tokens.css); no other file names a value. [src/styles/app.css](src/styles/app.css) reads them through `var(--mb-*)`, and component-local aliases (`--badge-fg`) are assigned from tokens rather than introducing new values.
+
+There is one accent (`--mb-color-accent`) because this is a clinical-adjacent monitoring surface: colour carries state, not decoration. Dark mode arrives through `prefers-color-scheme`, where the block redefines exactly the colour tokens — spacing, type, radii, and the alert marks stay put, so the shape of the interface does not change when the lights go out.
+
+[src/styles/tokens.test.ts](src/styles/tokens.test.ts) enforces all of it across every shipped file: families present, one accent, dark parity, no colour literal or paint attribute outside tokens.css, no dangling `var(--mb-*)`, and no token without a reader. Text pairs are asserted at 4.5:1 in both themes and meaningful non-text pairs at 3:1 (WCAG 2.2 SC 1.4.3 and 1.4.11 contrast minimums); the full WCAG 2.2 AA pass — focus order, target size, reflow — lands at C12.
+
+## Alert state palette
+
+Fixed at C10 because the C12 timeline renders these same three states. Hue is the last cue, never the only one, so the states stay apart for dichromats and in greyscale:
+
+| State      | Word       | Mark | Border style | Colour role             |
+| ---------- | ---------- | ---- | ------------ | ----------------------- |
+| `raised`   | "raised"   | ▲    | solid        | `--mb-alert-raised-*`   |
+| `ongoing`  | "ongoing"  | ◆    | dashed       | `--mb-alert-ongoing-*`  |
+| `resolved` | "resolved" | ✓    | dotted       | `--mb-alert-resolved-*` |
+
+[src/components/AlertStateBadge.tsx](src/components/AlertStateBadge.tsx) renders the word; the mark and border style come from the tokens through the `data-alert-state` attribute. The test asserts the three marks and the three border styles are pairwise distinct, so a later edit cannot quietly collapse the encoding back onto colour.
+
+## States are designed, not fallbacks
+
+Every read renders from one union in [src/data/useAsync.ts](src/data/useAsync.ts), so no screen can render nothing and call it a view. [src/components/StatusPanel.tsx](src/components/StatusPanel.tsx) carries the four:
+
+| State          | Says               | When                                                             |
+| -------------- | ------------------ | ---------------------------------------------------------------- |
+| `loading`      | "Reading devices"  | read in flight; `role="status"`, `aria-busy`                     |
+| `empty`        | "No data yet"      | server reachable, window holds no frames — with the demo command |
+| `error`        | "This read failed" | the server answered with a failure, message carried through      |
+| `disconnected` | "Connection lost"  | the API could not be reached at all                              |
+
+A fifth path is the one nobody designs: a component that throws. [src/components/ErrorBoundary.tsx](src/components/ErrorBoundary.tsx) catches it inside the shell, so the failure gets an error panel and the not-a-medical-device line stays on screen — a blank page reads as calm, which is the one thing this surface must never do by accident.
+
+Device-level staleness — a reachable server whose device has gone quiet, `lastReceivedAtMs` on `GET /devices` — is a different signal and is rendered at C11, per [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md). The chart slot on the device page stays a labelled placeholder until then rather than drawing a trace that is not live.
+
+## API client
+
+[src/api/client.ts](src/api/client.ts) types the five-route surface pinned by [apps/server/src/openapi.test.ts](../server/src/openapi.test.ts): `/healthz`, `/devices`, `/devices/:deviceId/frames`, and `/devices/:deviceId/alerts` over HTTP, plus the WebSocket `/ingest` URL, which `ingestUrl()` derives and C11 opens.
+
+The fetch call itself is isolated in [src/api/http.ts](src/api/http.ts) and injected as `fetchImpl`, so tests never patch globals — and a source scan in [src/styles/tokens.test.ts](src/styles/tokens.test.ts) fails the build if any other file opens a connection. Components reach data only through the context in [src/data/api-context.tsx](src/data/api-context.tsx), so C11 adds a streaming member to `MaekbeatApi` and a subscription hook beside `useAsync` without any component constructing a transport; the chart itself is new markup, so the device page does change.
+
+Failures are typed by cause — `network`, `http`, `contract` — which is what lets the UI tell "the server is down" apart from "the server said no" ([src/components/StatusPanel.tsx](src/components/StatusPanel.tsx)).
+
+## Test map
+
+| File                                                     | Pins                                                                                                                               |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| [src/App.test.tsx](src/App.test.tsx)                     | shell and disclaimer, routing, the four read states, retry, the error boundary, and the class contract in both directions          |
+| [src/api/client.test.ts](src/api/client.test.ts)         | four routes over a mocked fetch, URL building, and the network/http/contract failure split                                         |
+| [src/styles/tokens.test.ts](src/styles/tokens.test.ts)   | token families, one accent, dark parity, contrast ratios, no literals, no dead tokens, and the network kept inside src/api/http.ts |
+| [src/data/useAsync.test.tsx](src/data/useAsync.test.tsx) | loading → ready → error, reload, abort on unmount, and a superseded read never repainting the current one                          |
+| [src/format.test.ts](src/format.test.ts)                 | UTC instants, fixed-decimal values, signed clock delta                                                                             |
+
+Coverage runs with `pnpm --filter @maekbeat/web test:coverage` ([vitest.config.ts](vitest.config.ts), v8 provider, all of src/ minus tests). The browser entry [src/main.tsx](src/main.tsx) stays in the denominator untested, the apps/server `main.ts` precedent: excluding a file to make the number look better is a G3 event, not a convenience. Thresholds sit just under the C10 measured floor (94.81% statements / 93.87% branches / 97.72% functions / 95.04% lines) and are a ratchet — they move only up ([CLAUDE.md](../../CLAUDE.md)).
+
+## Configuration
+
+| Variable            | Default                 | Notes                                                    |
+| ------------------- | ----------------------- | -------------------------------------------------------- |
+| `VITE_API_BASE_URL` | `http://127.0.0.1:3000` | base URL of apps/server; only `VITE_` reaches the bundle |
+
+Vite exposes nothing else to the browser, and [.env.example](.env.example) holds no secrets — the development server it points at is unauthenticated ([apps/server/README.md](../server/README.md)).

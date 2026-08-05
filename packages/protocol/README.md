@@ -1,9 +1,11 @@
 # @maekbeat/protocol
 
 The wire contract every Maekbeat component shares: TypeScript types and zod schemas
-for the vitals frame. This package is the source of truth — the server imports it
-directly (apps/server, since C6), the web dashboard will at C10, and the iOS app
-will mirror it in Swift (planned — C14).
+for the vitals frame. This package is the source of truth, imported by three
+components today: packages/vitals-sim emits these frames (since C2), apps/server
+validates every inbound frame against them (since C6), and apps/web parses the
+frames and alert events inside each response with `vitalsFrameSchema` and
+`alertEventSchema` (since C10). The iOS app will mirror it in Swift (planned — C14).
 
 ## Vitals frame
 

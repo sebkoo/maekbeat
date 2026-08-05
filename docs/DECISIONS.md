@@ -67,3 +67,9 @@ Decision: Ingest dedupe is scoped to (deviceId, sessionEpoch, seq): a `seq` more
 Alternatives: A wire-level boot/session id (a protocol `v` bump); connection-scoped sessions; treating any regression as a new session.  
 Trade-offs: A reboot before `seq` exceeds the window is absorbed as duplicates, and any pre-reboot frame arriving after the new session starts is mislabeled into it — possibly re-storing an old frame and forking a further session (limits recorded in packages/protocol/README.md) — in exchange the wire stays v1 and out-of-order arrivals inside the window survive, where connection-scoped sessions would break C15 reconnect-replay idempotency and any-regression would misread every late packet as a reboot.  
 Why now: C6 ingest must handle replays and reboots today, the caveat has been on the record in packages/protocol/README.md since C1, and C15's reconnect design needs the rule fixed before the gateway exists.
+
+**12. Alert state is encoded three ways, hue last**  
+Decision: raised, ongoing, and resolved each carry a word, a mark glyph, and a border style alongside their colours (apps/web/src/styles/tokens.css), asserted pairwise distinct by apps/web/src/styles/tokens.test.ts.  
+Alternatives: a red/amber/green triad; colour plus an icon font; patterned fills.  
+Trade-offs: three cues per state cost badge width and one extra token pair per state, where a hue triad would be smaller and instantly familiar — but red/amber/green is the exact palette deuteranopia and protanopia collapse, and a greyscale screenshot flattens it entirely.  
+Why now: the C12 timeline renders these same three states and its WCAG 2.2 AA pass grades them, so fixing the encoding at the scaffold commit keeps C12 a verification step rather than a redesign.

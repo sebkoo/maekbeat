@@ -35,12 +35,27 @@ jobs:
       # pnpm -r silently skips packages without the script, so a package could
       # drop out of the gate with green CI. Assert every workspace package
       # carries test:coverage before running it (CLAUDE.md ratchet policy).
+      # Pathspecs mirror the pnpm-workspace.yaml globs, infra included, so a
+      # package added there cannot be gate-exempt. git grep reads tracked files
+      # only, which is exactly right in CI (checkout materialises nothing else)
+      # but means this step is not a local pre-commit check for a new package.
       - run: |
-          missing=$(git grep -L '"test:coverage"' -- 'apps/*/package.json' 'packages/*/package.json' || true)
+          pkgs='apps/*/package.json packages/*/package.json infra/package.json infra/*/package.json'
+          missing=$(git grep -L '"test:coverage"' -- $pkgs || true)
           if [ -n "$missing" ]; then
             echo "packages missing the test:coverage gate: $missing"
             exit 1
           fi
+          # The Codecov files list below is hand-written; a package absent from
+          # it uploads nothing while every gate stays green, which is the same
+          # silent drop-out one layer down. Assert each gated package is listed.
+          for pkg in $(git grep -l '"test:coverage"' -- $pkgs); do
+            dir=$(dirname "$pkg")
+            grep -q "$dir/coverage/lcov.info" .github/workflows/ci.yml || {
+              echo "coverage report for $dir is not uploaded in .github/workflows/ci.yml"
+              exit 1
+            }
+          done
       - run: pnpm -r test:coverage
       - run: pnpm -r typecheck
       # Badge #6 data source: the upload feeds the README Codecov badge, which
@@ -48,9 +63,27 @@ jobs:
       # fail_ci_if_error keeps a silent upload failure from leaving the badge
       # quietly stale. The token secret is optional for a public repository;
       # setting CODECOV_TOKEN removes tokenless-upload rate limits.
+      #
+      # Skipped where the token cannot exist. Checked 2026-08-05 against
+      # GitHub's documented behaviour: Actions secrets are withheld from pull
+      # requests opened off forks, and Dependabot-triggered runs read a separate
+      # Dependabot secret store — so fail_ci_if_error would fail healthy
+      # contributions once C23 opens the repo. Nothing is weakened: the real
+      # gate is the vitest coverage thresholds above, which run on every
+      # trigger, and this step only reports. To have Dependabot pull requests
+      # upload too, add CODECOV_TOKEN under Settings → Secrets and variables →
+      # Dependabot.
+      #
+      # Push is unconditional on purpose: a Dependabot auto-merge lands on main
+      # as a push by that actor, and skipping it would leave badge #6 showing a
+      # pre-merge number.
       - uses: codecov/codecov-action@v5
+        if: >-
+          github.event_name == 'push' ||
+          (github.actor != 'dependabot[bot]' &&
+          github.event.pull_request.head.repo.full_name == github.repository)
         with:
-          files: apps/server/coverage/lcov.info,packages/protocol/coverage/lcov.info,packages/vitals-sim/coverage/lcov.info
+          files: apps/server/coverage/lcov.info,apps/web/coverage/lcov.info,packages/protocol/coverage/lcov.info,packages/vitals-sim/coverage/lcov.info
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
 

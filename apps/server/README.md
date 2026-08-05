@@ -72,6 +72,8 @@ One row per test file, mapping it to the behaviors it pins — the file-to-behav
 
 Coverage is measured with `pnpm --filter @maekbeat/server test:coverage` ([vitest.config.ts](vitest.config.ts), v8 provider, all of src/ minus tests in the denominator — including the uncovered process entry [src/main.ts](src/main.ts); the one file outside the gate is the demo wiring, [scripts/demo.ts](scripts/demo.ts)). Since C9 the config carries thresholds set just under the measured floor, and the CI tests job runs the coverage-enabled suite, so a regression fails the build. Thresholds are a ratchet — they move only up, never down, never via new exclusions or narrowed globs (policy: [CLAUDE.md](../../CLAUDE.md)).
 
+The gate and the reporting are separate things, and C10 separated them in CI ([.github/workflows/ci.yml](../../.github/workflows/ci.yml)): the vitest thresholds run on every trigger, while the Codecov upload is skipped where its token cannot exist. Checked 2026-08-05 against GitHub's documented behaviour, that means pull requests opened off forks, which are denied Actions secrets, and Dependabot-triggered runs, which read a separate secret store. Without the condition `fail_ci_if_error` would fail healthy contributions once C23 opens the repo; with it, a fork pull request still cannot slip a coverage regression through, because the threshold check is local to vitest.
+
 ## Configuration
 
 | Variable        | Default       | Values                                                 |

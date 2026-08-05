@@ -1,0 +1,392 @@
+/*
+ * Component styles. Every value here comes from a token in tokens.css —
+ * src/styles/tokens.test.ts fails the build on a colour literal in this file,
+ * on a var(--mb-*) with no definition, and on a class selector no rendered
+ * state ever uses.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  background: var(--mb-color-canvas);
+  color: var(--mb-color-text);
+  font-family: var(--mb-font-sans);
+  font-size: var(--mb-text-md);
+  line-height: var(--mb-leading-normal);
+}
+
+:focus-visible {
+  outline: 2px solid var(--mb-color-accent);
+  outline-offset: 2px;
+}
+
+.mb-app {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+}
+
+/* Header — the disclaimer lives here, in the interface itself, because
+   labelling includes the surface a caregiver actually looks at. */
+.mb-header {
+  border-bottom: 1px solid var(--mb-color-border);
+  background: var(--mb-color-surface);
+}
+
+.mb-header__bar {
+  display: flex;
+  max-width: 72rem;
+  margin: 0 auto;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--mb-space-4);
+  padding: var(--mb-space-4) var(--mb-space-5);
+}
+
+.mb-brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--mb-space-2);
+}
+
+.mb-brand__name {
+  margin: 0;
+  font-size: var(--mb-text-lg);
+  font-weight: var(--mb-weight-bold);
+  line-height: var(--mb-leading-tight);
+  letter-spacing: 0.01em;
+}
+
+.mb-brand__tagline {
+  color: var(--mb-color-text-muted);
+  font-size: var(--mb-text-sm);
+}
+
+.mb-nav {
+  display: flex;
+  gap: var(--mb-space-3);
+}
+
+.mb-nav__link {
+  border-radius: var(--mb-radius-sm);
+  color: var(--mb-color-accent);
+  font-size: var(--mb-text-sm);
+  font-weight: var(--mb-weight-medium);
+  text-decoration: none;
+}
+
+.mb-nav__link:hover {
+  text-decoration: underline;
+}
+
+.mb-disclaimer {
+  margin: 0;
+  border-top: 1px solid var(--mb-color-border);
+  background: var(--mb-color-surface-sunken);
+  color: var(--mb-color-text-muted);
+  font-size: var(--mb-text-xs);
+  text-align: center;
+  padding: var(--mb-space-2) var(--mb-space-5);
+}
+
+.mb-disclaimer__link {
+  color: var(--mb-color-accent);
+}
+
+.mb-main {
+  width: 100%;
+  max-width: 72rem;
+  flex: 1;
+  margin: 0 auto;
+  padding: var(--mb-space-5);
+}
+
+.mb-page__title {
+  margin: 0 0 var(--mb-space-2);
+  font-size: var(--mb-text-xl);
+  line-height: var(--mb-leading-tight);
+}
+
+.mb-page__lead {
+  margin: 0 0 var(--mb-space-5);
+  max-width: 60ch;
+  color: var(--mb-color-text-muted);
+  font-size: var(--mb-text-sm);
+}
+
+.mb-card {
+  margin-bottom: var(--mb-space-5);
+  border: 1px solid var(--mb-color-border);
+  border-radius: var(--mb-radius-lg);
+  background: var(--mb-color-surface);
+  padding: var(--mb-space-5);
+}
+
+.mb-card__title {
+  margin: 0 0 var(--mb-space-4);
+  font-size: var(--mb-text-lg);
+  line-height: var(--mb-leading-tight);
+}
+
+.mb-meta {
+  margin: 0;
+  color: var(--mb-color-text-muted);
+  font-size: var(--mb-text-sm);
+}
+
+.mb-link {
+  color: var(--mb-color-accent);
+  font-weight: var(--mb-weight-medium);
+}
+
+/* Tables — vitals and counters are numbers read by eye, so figures are
+   monospaced and right-aligned; a column that reflows as digits change is
+   unreadable at a glance. */
+.mb-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--mb-text-sm);
+}
+
+.mb-table th,
+.mb-table td {
+  border-bottom: 1px solid var(--mb-color-border);
+  padding: var(--mb-space-2) var(--mb-space-3);
+  text-align: left;
+}
+
+.mb-table th {
+  color: var(--mb-color-text-muted);
+  font-size: var(--mb-text-xs);
+  font-weight: var(--mb-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.mb-table__numeric {
+  font-family: var(--mb-font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.mb-metrics {
+  display: grid;
+  gap: var(--mb-space-4);
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+}
+
+.mb-metric {
+  border: 1px solid var(--mb-color-border);
+  border-radius: var(--mb-radius-md);
+  background: var(--mb-color-surface-sunken);
+  padding: var(--mb-space-3) var(--mb-space-4);
+}
+
+.mb-metric__label {
+  display: block;
+  color: var(--mb-color-text-muted);
+  font-size: var(--mb-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.mb-metric__value {
+  font-family: var(--mb-font-mono);
+  font-size: var(--mb-text-lg);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--mb-weight-medium);
+}
+
+.mb-metric__unit {
+  margin-left: var(--mb-space-1);
+  color: var(--mb-color-text-muted);
+  font-size: var(--mb-text-xs);
+}
+
+/* Alert badge — three cues per state (word, mark, border style) before hue
+   is asked to carry anything. Token values: tokens.css. */
+.mb-alert-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mb-space-2);
+  border: 2px var(--badge-border-style) var(--badge-border);
+  border-radius: var(--mb-radius-pill);
+  background: var(--badge-bg);
+  color: var(--badge-fg);
+  padding: var(--mb-space-1) var(--mb-space-3);
+  font-size: var(--mb-text-xs);
+  font-weight: var(--mb-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.mb-alert-badge::before {
+  content: var(--badge-mark);
+  font-size: var(--mb-text-sm);
+  line-height: 1;
+}
+
+.mb-alert-badge[data-alert-state="raised"] {
+  --badge-fg: var(--mb-alert-raised-fg);
+  --badge-bg: var(--mb-alert-raised-bg);
+  --badge-border: var(--mb-alert-raised-border);
+  --badge-border-style: var(--mb-alert-raised-border-style);
+  --badge-mark: var(--mb-alert-raised-mark);
+}
+
+.mb-alert-badge[data-alert-state="ongoing"] {
+  --badge-fg: var(--mb-alert-ongoing-fg);
+  --badge-bg: var(--mb-alert-ongoing-bg);
+  --badge-border: var(--mb-alert-ongoing-border);
+  --badge-border-style: var(--mb-alert-ongoing-border-style);
+  --badge-mark: var(--mb-alert-ongoing-mark);
+}
+
+.mb-alert-badge[data-alert-state="resolved"] {
+  --badge-fg: var(--mb-alert-resolved-fg);
+  --badge-bg: var(--mb-alert-resolved-bg);
+  --badge-border: var(--mb-alert-resolved-border);
+  --badge-border-style: var(--mb-alert-resolved-border-style);
+  --badge-mark: var(--mb-alert-resolved-mark);
+}
+
+.mb-alert-list {
+  display: flex;
+  margin: 0;
+  flex-direction: column;
+  gap: var(--mb-space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.mb-alert-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mb-space-4);
+  border: 1px solid var(--mb-color-border);
+  border-radius: var(--mb-radius-md);
+  padding: var(--mb-space-3) var(--mb-space-4);
+}
+
+.mb-alert-row__meta {
+  color: var(--mb-color-text-muted);
+  font-family: var(--mb-font-mono);
+  font-size: var(--mb-text-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Placeholder for a surface a later commit fills — labelled with its commit
+   number, never dressed up as working UI. */
+.mb-placeholder {
+  border: 1px dashed var(--mb-color-border-strong);
+  border-radius: var(--mb-radius-md);
+  color: var(--mb-color-text-muted);
+  font-size: var(--mb-text-sm);
+  padding: var(--mb-space-6) var(--mb-space-4);
+  text-align: center;
+}
+
+/* Loading, empty, and error are first-class states with the same weight as
+   data: a monitoring surface that cannot say "no data yet" or "disconnected"
+   honestly is worse than none. */
+.mb-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--mb-space-2);
+  border: 1px solid var(--mb-color-border);
+  border-radius: var(--mb-radius-lg);
+  background: var(--mb-color-surface);
+  padding: var(--mb-space-6) var(--mb-space-5);
+  text-align: center;
+}
+
+.mb-state__title {
+  margin: 0;
+  font-size: var(--mb-text-lg);
+  line-height: var(--mb-leading-tight);
+}
+
+.mb-state__detail {
+  margin: 0;
+  max-width: 52ch;
+  color: var(--mb-color-text-muted);
+  font-size: var(--mb-text-sm);
+}
+
+.mb-state--loading {
+  border-style: dashed;
+}
+
+.mb-state--empty {
+  background: var(--mb-color-surface-sunken);
+}
+
+.mb-state--error {
+  border-color: var(--mb-alert-raised-border);
+  border-width: 2px;
+}
+
+.mb-state--error .mb-state__title::before {
+  content: var(--mb-alert-raised-mark);
+  margin-right: var(--mb-space-2);
+  color: var(--mb-alert-raised-fg);
+}
+
+/* A lost connection is not a failed request: it borrows the ongoing palette
+   and its own mark, so the two failure states never read as one. */
+.mb-state--disconnected {
+  border-color: var(--mb-alert-ongoing-border);
+  border-style: var(--mb-alert-ongoing-border-style);
+  border-width: 2px;
+}
+
+.mb-state--disconnected .mb-state__title::before {
+  content: var(--mb-alert-ongoing-mark);
+  margin-right: var(--mb-space-2);
+  color: var(--mb-alert-ongoing-fg);
+}
+
+.mb-button {
+  border: 1px solid transparent;
+  border-radius: var(--mb-radius-sm);
+  background: var(--mb-color-accent);
+  color: var(--mb-color-accent-contrast);
+  padding: var(--mb-space-2) var(--mb-space-4);
+  font: inherit;
+  font-size: var(--mb-text-sm);
+  font-weight: var(--mb-weight-medium);
+  cursor: pointer;
+}
+
+@media (max-width: 40rem) {
+  .mb-header__bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--mb-space-2);
+  }
+
+  .mb-main {
+    padding: var(--mb-space-4) var(--mb-space-3);
+  }
+
+  .mb-alert-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .mb-alert-row__meta {
+    text-align: left;
+  }
+}

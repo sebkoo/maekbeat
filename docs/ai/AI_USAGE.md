@@ -4,15 +4,25 @@ This project is built with AI assistance, disclosed here at the project level. T
 
 ## Model
 
-Model identifier as reported by the execution environment: claude-fable-5. Recorded: 2026-08-04.
+One row per identifier, read from the execution environment at the time the work ran — never copied from a prompt, a release note, or a previous row:
+
+| Commits                         | Model identifier as reported by the execution environment | Recorded   |
+| ------------------------------- | --------------------------------------------------------- | ---------- |
+| C0–C9                           | claude-fable-5                                            | 2026-08-04 |
+| C10 — implementation            | claude-fable-5                                            | 2026-08-05 |
+| C10 — adversarial review agents | claude-opus-5                                             | 2026-08-05 |
 
 Model identifiers may be preview names not yet listed in Anthropic's public model documentation as of the recording date.
 
-## Effort tiers
+## Model and effort tiers
+
+Policy, not record: tiering is per task, not per project — an Opus-class model for design-heavy commits and for every adversarial reviewer, a Sonnet-class model where the work is mechanical or scaffolding. What actually ran is the table above, which grows a row whenever the reported identifier changes.
 
 - xhigh: architecture and review passes.
 - high: features and docs writing.
 - medium: boilerplate and scaffolding.
+
+Downshifting is safe here because the gates are model-independent. `.githooks/commit-msg` and the CI hygiene job reject the same commit messages either way; the per-package coverage ratchet (each `vitest.config.ts`), the seeded property suites in apps/server, and the byte-pinned golden fixtures in packages/vitals-sim fail on the same diffs regardless of which model wrote them.
 
 ## Loop contract
 

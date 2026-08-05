@@ -1,0 +1,109 @@
+/*
+ * Design tokens — the only file in apps/web that names a raw value.
+ * Every other stylesheet reads from here through var(--mb-*), which
+ * src/styles/tokens.test.ts enforces (no colour literals outside this file,
+ * no dangling references, no unused tokens).
+ *
+ * Naming: --mb-* is a token. Unprefixed custom properties (--badge-fg) are
+ * component-local aliases assigned from tokens, never new values.
+ *
+ * Themes: :root is the light theme; the prefers-color-scheme block below
+ * redefines exactly the colour-valued tokens. Non-colour tokens (space, type,
+ * radii, the alert marks and border styles) are theme-independent by design —
+ * the shape of the interface must not change when the lights go out.
+ */
+
+:root {
+  /* Colour — surfaces and text.
+     One accent, deliberately: this is a clinical-adjacent monitoring surface,
+     so colour carries state, not decoration. */
+  --mb-color-canvas: #f4f6f8;
+  --mb-color-surface: #ffffff;
+  --mb-color-surface-sunken: #eaeef2;
+  --mb-color-border: #ccd4dc;
+  --mb-color-border-strong: #6d7884;
+  --mb-color-text: #12212e;
+  --mb-color-text-muted: #4a5b6b;
+  --mb-color-accent: #0a5c9c;
+  --mb-color-accent-contrast: #ffffff;
+
+  /* Colour — alert states (raised / ongoing / resolved).
+     Hue is the last cue, never the only one. Each state ships a mark glyph and
+     a border style alongside its colours, so the three stay distinguishable in
+     greyscale, under deuteranopia and protanopia, and on a projector: the badge
+     also spells the state in words. Fixed here at C10 because the C12 timeline
+     renders these same three states and the WCAG 2.2 AA pass lands with it. */
+  --mb-alert-raised-fg: #8c1d18;
+  --mb-alert-raised-bg: #fdeceb;
+  --mb-alert-raised-border: #b3261e;
+  --mb-alert-raised-mark: "▲";
+  --mb-alert-raised-border-style: solid;
+
+  --mb-alert-ongoing-fg: #6b4b00;
+  --mb-alert-ongoing-bg: #fdf3d8;
+  --mb-alert-ongoing-border: #8a6100;
+  --mb-alert-ongoing-mark: "◆";
+  --mb-alert-ongoing-border-style: dashed;
+
+  --mb-alert-resolved-fg: #1f4b63;
+  --mb-alert-resolved-bg: #e8eff4;
+  --mb-alert-resolved-border: #2b6b8c;
+  --mb-alert-resolved-mark: "✓";
+  --mb-alert-resolved-border-style: dotted;
+
+  /* Spacing — a 4 px base, six steps. Nothing in the UI may pick a gap
+     outside this scale. */
+  --mb-space-1: 0.25rem;
+  --mb-space-2: 0.5rem;
+  --mb-space-3: 0.75rem;
+  --mb-space-4: 1rem;
+  --mb-space-5: 1.5rem;
+  --mb-space-6: 2rem;
+
+  /* Type — system stack for prose, monospace with tabular figures for vitals:
+     a heart rate that changes width as it changes value is unreadable at a
+     glance, which is the only way this surface is ever read. */
+  --mb-font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mb-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --mb-text-xs: 0.75rem;
+  --mb-text-sm: 0.875rem;
+  --mb-text-md: 1rem;
+  --mb-text-lg: 1.25rem;
+  --mb-text-xl: 1.75rem;
+  --mb-leading-tight: 1.25;
+  --mb-leading-normal: 1.55;
+  --mb-weight-medium: 600;
+  --mb-weight-bold: 700;
+
+  /* Radii */
+  --mb-radius-sm: 0.25rem;
+  --mb-radius-md: 0.5rem;
+  --mb-radius-lg: 0.75rem;
+  --mb-radius-pill: 999px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --mb-color-canvas: #0d151d;
+    --mb-color-surface: #16202b;
+    --mb-color-surface-sunken: #0a1119;
+    --mb-color-border: #2c3a48;
+    --mb-color-border-strong: #8593a1;
+    --mb-color-text: #e8eef4;
+    --mb-color-text-muted: #a8b6c4;
+    --mb-color-accent: #6cb6ff;
+    --mb-color-accent-contrast: #06121e;
+
+    --mb-alert-raised-fg: #ffb4aa;
+    --mb-alert-raised-bg: #3a0f0c;
+    --mb-alert-raised-border: #ff6b5e;
+
+    --mb-alert-ongoing-fg: #ffd98a;
+    --mb-alert-ongoing-bg: #2e2408;
+    --mb-alert-ongoing-border: #d9a521;
+
+    --mb-alert-resolved-fg: #9fd2ee;
+    --mb-alert-resolved-bg: #0f2a38;
+    --mb-alert-resolved-border: #4ea3cc;
+  }
+}
