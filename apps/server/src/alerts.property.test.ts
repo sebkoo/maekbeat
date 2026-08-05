@@ -150,6 +150,11 @@ describe("AlertEngine under seeded clock-regression fuzz", () => {
     // never-elapsing cooldown and are suppressed — counted, not raised.
     expect(transitions.map((t) => t.state)).toEqual(["raised", "resolved"]);
     expect(transitions[1]?.resolvedAtMs).toBe(transitions[0]?.raisedAtMs);
-    expect(engine.countersFor("frozen-dev")).toEqual({ raised: 1, resolved: 1, suppressed: 3 });
+    expect(engine.countersFor("frozen-dev")).toEqual({
+      raised: 1,
+      resolved: 1,
+      suppressed: 3,
+      forcedEvictions: 0,
+    });
   });
 });

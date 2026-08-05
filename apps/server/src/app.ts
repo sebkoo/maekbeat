@@ -80,9 +80,19 @@ export async function buildApp(config: ServerConfig, options: BuildAppOptions = 
   }
 
   const store = new VitalsStore(config.RING_CAPACITY);
-  const engine = new AlertEngine(options.alertRules ?? DEFAULT_ALERT_RULES);
-  const broadcaster = new DeviceBroadcaster();
   const decisions = new DecisionLog();
+  // The engine evicts triaged alerts first and asks the log which those are;
+  // a forced eviction — the history full of undecided alerts — is an
+  // operational signal, so it is logged rather than counted quietly.
+  const engine = new AlertEngine(options.alertRules ?? DEFAULT_ALERT_RULES, {
+    isDecided: (deviceId, alertId) => decisions.isDecided(deviceId, alertId),
+    onForcedEviction: ({ deviceId, alertId }) =>
+      app.log.warn(
+        { deviceId, alertId },
+        "alert history full of undecided alerts; dropped the oldest undecided one",
+      ),
+  });
+  const broadcaster = new DeviceBroadcaster();
   const counters: IngestCounters = { received: 0, rejectedInvalid: 0 };
   app.decorate("vitalsStore", store);
   app.decorate("alertEngine", engine);

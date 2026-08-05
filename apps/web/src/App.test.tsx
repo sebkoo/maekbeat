@@ -551,6 +551,31 @@ describe("styles are applied, not merely defined", () => {
     collect();
     cleanup();
 
+    // A decision whose alert the server no longer retains, so the orphan row
+    // is among the classes checked.
+    renderApp(
+      fakeApi({
+        readAlerts: async () => ({
+          ...ALERTS,
+          alerts: [],
+          decisions: [
+            {
+              eventId: "sim-dev-1:decision:9",
+              alertId: "sim-dev-1:spo2-low:1754000000000:1",
+              deviceId: "sim-dev-1",
+              decision: "dismissed" as const,
+              actor: "night-shift",
+              recordedAtMs: 1_754_000_300_000,
+            },
+          ],
+        }),
+      }),
+      "/devices/sim-dev-1",
+    );
+    await screen.findByText("Decided, alert no longer retained");
+    collect();
+    cleanup();
+
     // And a decision the server refused, so the failure line is covered too.
     renderApp(
       fakeApi({

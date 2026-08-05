@@ -85,6 +85,8 @@ An alert episode is one row, not one row per firing: the C7 engine already gives
 
 Acknowledgement is server state, not a checkbox. The dashboard POSTs to `/devices/:deviceId/alerts/:alertId/decisions` and the server appends an event to its log ([apps/server/src/acks.ts](../server/src/acks.ts)); the decision in force is derived by reading the newest event for an alert, never by mutating a row. A metric that dies on reload is not a metric, and the C23 product loop counts acknowledged against dismissed — the distinction that carries the false-alarm signal: `acknowledged` is seen and acted on, `dismissed` is seen and judged not actionable.
 
+A decision can outlive the alert it judged: the server's log is append-only while its alert history is a bounded cache that evicts decided alerts first ([docs/DECISIONS.md](../../docs/DECISIONS.md) #15). The timeline shows those as their own rows rather than dropping them, because hiding a judgement whose subject was evicted would lose the only record that anyone triaged the event.
+
 Nothing is shown as decided until the server says so. The row goes busy while the request is in flight and the decision appears only from the appended event; a refusal leaves the buttons in place and states the reason, because a checkmark for an audit-log entry that does not exist would be the interface lying about a record. A decision recorded on another dashboard arrives over the same fan-out socket.
 
 ## Accessibility (WCAG 2.2 AA, C12)

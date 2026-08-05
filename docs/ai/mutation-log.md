@@ -39,22 +39,22 @@ working tree and reverted immediately; none is present in any commit.
 
 ## C12 — timeline, acknowledgement, WCAG 2.2 AA
 
-| Guard                                      | Mutation                                                    | Result |
-| ------------------------------------------ | ----------------------------------------------------------- | ------ |
-| append-only decision log                   | make `append` replace the existing event for an alert       | caught |
-| decisions in force                         | count every event instead of the newest per alert           | caught |
-| the log is not handed out by reference     | return the internal array from `list()`                     | caught |
-| a decision needs a real alert              | remove the engine membership check from the route           | caught |
-| decisions reach other dashboards           | stop publishing the appended event                          | caught |
-| a refused decision leaves no checkmark     | apply the decision optimistically before the server answers | caught |
-| a running episode is not shown as finished | drop the "and counting" branch                              | caught |
-| the chart is not a live region             | add `aria-live` to the chart element                        | caught |
-| silence on arrival                         | remove the priming guard from the announcer                 | caught |
-| the announcer speaks only on transitions   | announce on every render                                    | caught |
-| acknowledgement controls are real buttons  | swap the button for a `div` with `role="button"`            | caught |
-| lifecycle grouping                         | make `mergeAlerts` append instead of replacing by alertId   | caught |
-| decisions from the socket are applied      | drop the decision branch from the client's message handler  | caught |
-| declared target size                       | delete `min-width`/`min-height` from `.mb-button`           | caught |
+| Guard                                      | Mutation                                                    | Result                                                                  |
+| ------------------------------------------ | ----------------------------------------------------------- | ----------------------------------------------------------------------- |
+| append-only decision log                   | make `append` replace the existing event for an alert       | caught                                                                  |
+| decisions in force                         | count every event instead of the newest per alert           | caught                                                                  |
+| the log is not handed out by reference     | return the internal array from `list()`                     | caught                                                                  |
+| a decision needs a real alert              | remove the engine membership check from the route           | caught (superseded at C12a: presence is no longer the test — see below) |
+| decisions reach other dashboards           | stop publishing the appended event                          | caught                                                                  |
+| a refused decision leaves no checkmark     | apply the decision optimistically before the server answers | caught                                                                  |
+| a running episode is not shown as finished | drop the "and counting" branch                              | caught                                                                  |
+| the chart is not a live region             | add `aria-live` to the chart element                        | caught                                                                  |
+| silence on arrival                         | remove the priming guard from the announcer                 | caught                                                                  |
+| the announcer speaks only on transitions   | announce on every render                                    | caught                                                                  |
+| acknowledgement controls are real buttons  | swap the button for a `div` with `role="button"`            | caught                                                                  |
+| lifecycle grouping                         | make `mergeAlerts` append instead of replacing by alertId   | caught                                                                  |
+| decisions from the socket are applied      | drop the decision branch from the client's message handler  | caught                                                                  |
+| declared target size                       | delete `min-width`/`min-height` from `.mb-button`           | caught                                                                  |
 
 Two C12 proofs failed to catch their mutation on the first attempt, which is the
 point of running them: `mergeAlerts` appending was invisible because the test
@@ -66,3 +66,29 @@ adding the missing assertions, then re-proved.
 Four further C12 tests were shown vacuous by the adversarial pass that followed,
 after these proofs had passed — recorded in [AI_USAGE.md](AI_USAGE.md). A
 mutation proves only what it mutates.
+
+## C12a — semantic eviction
+
+Each guard is broken twice: by mutating the thing it names, and by mutating the
+thing next to it.
+
+| Guard                               | Own mutation                                        | Neighbour mutation                                      | Result |
+| ----------------------------------- | --------------------------------------------------- | ------------------------------------------------------- | ------ |
+| decided evicted before undecided    | evict in arrival order regardless of decision state | evict the newest decided instead of the oldest          | caught |
+| a running episode is not forgotten  | prefer any decided alert, resolved or not           | —                                                       | caught |
+| forced evictions counted            | drop the counter increment                          | count but never announce                                | caught |
+| the warn means "nobody is triaging" | announce on a healthy decided-first eviction        | —                                                       | caught |
+| an evicted alert stays decidable    | require presence in the history again               | stop checking device ownership                          | caught |
+| alertIds are canonical              | drop the mint/parse round-trip check                | parse the device id from the left instead of the right  | caught |
+| every mintable id is parseable      | allow a rule id outside the alertId charset         | —                                                       | caught |
+| decisions are device-scoped         | search every device's log in `isDecided`            | —                                                       | caught |
+| the counter is per device           | serve the process-wide counter on the device row    | hard-code zero                                          | caught |
+| the feature is actually wired       | drop `isDecided` from the composition root          | drop the forced-eviction warn from the composition root | caught |
+
+Three of these failed to fail on the first attempt, and each exposed something
+real: the device-summary counter was only ever asserted against zero, so a
+global counter passed; the running-episode test put the open alert after the
+resolved one, so arrival order hid the bug; and the whole feature could be
+unwired in `buildApp` with all 111 server tests still green, because every unit
+test built its own engine. The integration suite in
+apps/server/src/retention.integration.test.ts exists because of that last one.

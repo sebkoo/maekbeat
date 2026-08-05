@@ -36,7 +36,17 @@ export interface AlertTimelineProps {
 }
 
 export function AlertTimeline(props: AlertTimelineProps) {
-  if (props.alerts.length === 0) {
+  // A decision can outlive the alert it judged: the server's decision log is
+  // append-only while its alert history is a bounded cache (docs/DECISIONS.md
+  // #15). Those decisions are shown as their own rows rather than dropped —
+  // hiding a judgement because its subject was evicted would lose the only
+  // record that anyone triaged the event at all.
+  const retained = new Set(props.alerts.map((alert) => alert.alertId));
+  const orphaned = [...props.decisions.values()]
+    .filter((decision) => !retained.has(decision.alertId))
+    .sort((a, b) => b.recordedAtMs - a.recordedAtMs);
+
+  if (props.alerts.length === 0 && orphaned.length === 0) {
     return <p className="mb-meta">No alerts recorded for this device.</p>;
   }
 
@@ -112,6 +122,22 @@ export function AlertTimeline(props: AlertTimelineProps) {
           </li>
         );
       })}
+
+      {orphaned.map((decision) => (
+        <li className="mb-timeline__row mb-timeline__row--orphaned" key={decision.eventId}>
+          <div className="mb-timeline__head">
+            <span className="mb-timeline__metric">Decided, alert no longer retained</span>
+            <span className="mb-timeline__duration">{decision.alertId}</span>
+          </div>
+          <p className="mb-timeline__decision" data-decision={decision.decision}>
+            {decision.decision === "acknowledged" ? "Acknowledged" : "Dismissed"} by{" "}
+            {decision.actor} at {formatInstant(decision.recordedAtMs)}
+          </p>
+          <p className="mb-timeline__times">
+            The alert record left the server&rsquo;s bounded history; the decision log kept this.
+          </p>
+        </li>
+      ))}
     </ol>
   );
 }

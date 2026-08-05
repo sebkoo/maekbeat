@@ -74,6 +74,23 @@ describe("DecisionLog", () => {
     expect(log.countsFor("dev-2")).toEqual({ acknowledged: 0, dismissed: 0 });
   });
 
+  it("answers isDecided per device, never across them", () => {
+    const log = new DecisionLog();
+    log.append({
+      deviceId: "dev-2",
+      alertId: "shared-id",
+      decision: "acknowledged",
+      actor: "a",
+      recordedAtMs: 1,
+    });
+
+    expect(log.isDecided("dev-2", "shared-id")).toBe(true);
+    // Device scoping is what stops one device's decision from authorising an
+    // eviction on another device's alert history.
+    expect(log.isDecided("dev-1", "shared-id")).toBe(false);
+    expect(log.isDecided("dev-2", "other-id")).toBe(false);
+  });
+
   it("bounds retention by dropping the oldest events, never by rewriting one", () => {
     const log = new DecisionLog(3);
     for (let i = 1; i <= 5; i++) {
@@ -252,8 +269,8 @@ describe("POST /devices/:deviceId/alerts/:alertId/decisions", () => {
     expect((decisions[0]?.decision as { decision: string }).decision).toBe("dismissed");
   });
 
-  it("refuses a decision on an alert the engine never raised", async () => {
-    const { base } = await serverWithAlert();
+  it("refuses a malformed alertId rather than logging a shape it cannot read", async () => {
+    const { app, base } = await serverWithAlert();
 
     const response = await fetch(`http://${base}/devices/sim-ack/alerts/ghost/decisions`, {
       method: "POST",
@@ -261,10 +278,109 @@ describe("POST /devices/:deviceId/alerts/:alertId/decisions", () => {
       body: JSON.stringify({ decision: "acknowledged", actor: "web-dashboard" }),
     });
 
+    expect(response.status).toBe(400);
+    expect((await response.json()) as Record<string, unknown>).toMatchObject({
+      message: "malformed alertId: ghost",
+    });
+    expect(app.decisionLog.list("sim-ack")).toHaveLength(0);
+  });
+
+  it("refuses an alertId that belongs to another device", async () => {
+    const { app, base } = await serverWithAlert();
+    const foreign = "other-dev:spo2-low:1754000000000:1";
+
+    const response = await fetch(
+      `http://${base}/devices/sim-ack/alerts/${encodeURIComponent(foreign)}/decisions`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ decision: "acknowledged", actor: "web-dashboard" }),
+      },
+    );
+
     expect(response.status).toBe(404);
     expect((await response.json()) as Record<string, unknown>).toMatchObject({
-      message: "unknown alert: ghost on sim-ack",
+      message: `alert ${foreign} does not belong to sim-ack`,
     });
+    expect(app.decisionLog.list("sim-ack")).toHaveLength(0);
+  });
+
+  // Owned and well formed is not the same as plausible: without the record,
+  // the rule, the ordinal and the raise time are still checkable against what
+  // this engine could have minted.
+  it("refuses an alertId naming a rule this engine does not judge by", async () => {
+    const { app, base } = await serverWithAlert();
+    const invented = "sim-ack:made-up-rule:1754000000000:1";
+
+    const response = await fetch(
+      `http://${base}/devices/sim-ack/alerts/${encodeURIComponent(invented)}/decisions`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ decision: "acknowledged", actor: "web-dashboard" }),
+      },
+    );
+
+    expect(response.status).toBe(400);
+    expect((await response.json()) as Record<string, unknown>).toMatchObject({
+      message: "unknown alert rule: made-up-rule",
+    });
+    expect(app.decisionLog.list("sim-ack")).toHaveLength(0);
+  });
+
+  it("refuses a raise ordinal this device has never reached", async () => {
+    const { app, base } = await serverWithAlert();
+    const raised = app.alertEngine.countersFor("sim-ack").raised;
+    const beyond = `sim-ack:spo2-low:1754000000000:${raised + 1}`;
+
+    const response = await fetch(
+      `http://${base}/devices/sim-ack/alerts/${encodeURIComponent(beyond)}/decisions`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ decision: "acknowledged", actor: "web-dashboard" }),
+      },
+    );
+
+    expect(response.status).toBe(404);
+    expect(app.decisionLog.list("sim-ack")).toHaveLength(0);
+  });
+
+  it("refuses an alert claiming to have been raised in the future", async () => {
+    const { app, base } = await serverWithAlert();
+    const future = `sim-ack:spo2-low:${Date.now() + 600_000}:1`;
+
+    const response = await fetch(
+      `http://${base}/devices/sim-ack/alerts/${encodeURIComponent(future)}/decisions`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ decision: "acknowledged", actor: "web-dashboard" }),
+      },
+    );
+
+    expect(response.status).toBe(404);
+    expect(app.decisionLog.list("sim-ack")).toHaveLength(0);
+  });
+
+  // The log outlives the ring: an alert the history has already dropped must
+  // still be decidable, or the cache could bury a real event for good.
+  it("accepts a decision for an alert the history no longer holds", async () => {
+    const { app, base } = await serverWithAlert();
+    const evicted = "sim-ack:spo2-low:1754000000000:1";
+    expect(app.alertEngine.listAlerts("sim-ack").some((a) => a.alertId === evicted)).toBe(false);
+
+    const response = await fetch(
+      `http://${base}/devices/sim-ack/alerts/${encodeURIComponent(evicted)}/decisions`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ decision: "dismissed", actor: "web-dashboard" }),
+      },
+    );
+
+    expect(response.status).toBe(201);
+    expect(app.decisionLog.list("sim-ack").map((event) => event.alertId)).toEqual([evicted]);
   });
 
   it("refuses an unknown key in the body rather than silently dropping it", async () => {

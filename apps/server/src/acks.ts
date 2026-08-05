@@ -53,6 +53,15 @@ export class DecisionLog {
     return event;
   }
 
+  /**
+   * Whether any decision has been recorded for this alert. The alert engine
+   * asks this when it must evict (apps/server/src/alerts.ts): a triaged alert
+   * is the one safe thing to forget.
+   */
+  isDecided(deviceId: string, alertId: string): boolean {
+    return (this.byDevice.get(deviceId) ?? []).some((event) => event.alertId === alertId);
+  }
+
   /** The device's log, oldest first; the events themselves are frozen. */
   list(deviceId: string): ReadonlyArray<Readonly<AlertDecisionEvent>> {
     return [...(this.byDevice.get(deviceId) ?? [])];

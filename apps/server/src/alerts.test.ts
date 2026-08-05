@@ -60,7 +60,12 @@ describe("AlertEngine lifecycle", () => {
     const listed = engine.listAlerts("unit-dev");
     expect(listed).toHaveLength(1);
     expect(listed[0]?.state).toBe("ongoing");
-    expect(engine.countersFor("unit-dev")).toEqual({ raised: 1, resolved: 0, suppressed: 0 });
+    expect(engine.countersFor("unit-dev")).toEqual({
+      raised: 1,
+      resolved: 0,
+      suppressed: 0,
+      forcedEvictions: 0,
+    });
   });
 
   it("resists flapping: values between exit and enter thresholds hold the alert open", () => {
@@ -75,7 +80,12 @@ describe("AlertEngine lifecycle", () => {
       expect(events).toHaveLength(0);
       tick += 1;
     }
-    expect(engine.countersFor("unit-dev")).toEqual({ raised: 1, resolved: 0, suppressed: 0 });
+    expect(engine.countersFor("unit-dev")).toEqual({
+      raised: 1,
+      resolved: 0,
+      suppressed: 0,
+      forcedEvictions: 0,
+    });
 
     // Sustained recovery resolves exactly once.
     let resolved: unknown[] = [];
@@ -85,7 +95,12 @@ describe("AlertEngine lifecycle", () => {
     }
     expect(resolved).toHaveLength(1);
     expect(engine.listAlerts("unit-dev")[0]?.state).toBe("resolved");
-    expect(engine.countersFor("unit-dev")).toEqual({ raised: 1, resolved: 1, suppressed: 0 });
+    expect(engine.countersFor("unit-dev")).toEqual({
+      raised: 1,
+      resolved: 1,
+      suppressed: 0,
+      forcedEvictions: 0,
+    });
   });
 
   it("suppresses a re-fire inside the cooldown (counted once), raises after it expires", () => {
@@ -95,7 +110,12 @@ describe("AlertEngine lifecycle", () => {
       engine.process(frameAt(tick, { spo2Pct: spo2 }));
       tick += 1;
     }
-    expect(engine.countersFor("unit-dev")).toEqual({ raised: 1, resolved: 1, suppressed: 0 });
+    expect(engine.countersFor("unit-dev")).toEqual({
+      raised: 1,
+      resolved: 1,
+      suppressed: 0,
+      forcedEvictions: 0,
+    });
     const resolvedAtTick = 5;
 
     // Breach again immediately: inside the 10 s cooldown — suppressed, once.
@@ -117,7 +137,12 @@ describe("AlertEngine lifecycle", () => {
     expect(secondRaise[0]!.raisedAtMs - (BASE_MS + resolvedAtTick * 1_000)).toBeGreaterThanOrEqual(
       TEST_RULE.cooldownMs,
     );
-    expect(engine.countersFor("unit-dev")).toEqual({ raised: 2, resolved: 1, suppressed: 1 });
+    expect(engine.countersFor("unit-dev")).toEqual({
+      raised: 2,
+      resolved: 1,
+      suppressed: 1,
+      forcedEvictions: 0,
+    });
   });
 
   it("ends a suppressed episode on recovery; a post-cooldown episode raises normally", () => {
@@ -142,7 +167,12 @@ describe("AlertEngine lifecycle", () => {
       ...engine.process(frameAt(tick + 2, { spo2Pct: 89 })),
     ];
     expect(events).toHaveLength(1);
-    expect(engine.countersFor("unit-dev")).toEqual({ raised: 2, resolved: 1, suppressed: 1 });
+    expect(engine.countersFor("unit-dev")).toEqual({
+      raised: 2,
+      resolved: 1,
+      suppressed: 1,
+      forcedEvictions: 0,
+    });
   });
 
   it("counts suppressed once per genuine episode: a lone breach cannot re-latch", () => {
@@ -168,7 +198,12 @@ describe("AlertEngine lifecycle", () => {
       engine.process(frameAt(tick, { spo2Pct: spo2 }));
       tick += 1;
     }
-    expect(engine.countersFor("unit-dev")).toEqual({ raised: 1, resolved: 1, suppressed: 2 });
+    expect(engine.countersFor("unit-dev")).toEqual({
+      raised: 1,
+      resolved: 1,
+      suppressed: 2,
+      forcedEvictions: 0,
+    });
   });
 
   it("keeps window time monotonic: a resolve can never be dated before its raise", () => {
@@ -263,7 +298,7 @@ describe("AlertEngine against vitals-sim scenarios", () => {
     for (const seed of SILENCE_SEEDS) {
       const { engine, events } = runScenario({ scenario: "rest", seed }, 300);
       expect(events).toHaveLength(0);
-      expect(engine.stats).toEqual({ raised: 0, resolved: 0, suppressed: 0 });
+      expect(engine.stats).toEqual({ raised: 0, resolved: 0, suppressed: 0, forcedEvictions: 0 });
     }
   });
 
@@ -271,7 +306,7 @@ describe("AlertEngine against vitals-sim scenarios", () => {
     for (const seed of SILENCE_SEEDS) {
       const { engine, events } = runScenario({ scenario: "motion", seed }, 300);
       expect(events).toHaveLength(0);
-      expect(engine.stats).toEqual({ raised: 0, resolved: 0, suppressed: 0 });
+      expect(engine.stats).toEqual({ raised: 0, resolved: 0, suppressed: 0, forcedEvictions: 0 });
     }
   });
 
@@ -281,7 +316,7 @@ describe("AlertEngine against vitals-sim scenarios", () => {
       { state: "raised", ruleTick: 89, alertId: "sim-001:spo2-low:1089000:1" },
       { state: "resolved", ruleTick: 152, alertId: "sim-001:spo2-low:1089000:1" },
     ]);
-    expect(engine.stats).toEqual({ raised: 1, resolved: 1, suppressed: 0 });
+    expect(engine.stats).toEqual({ raised: 1, resolved: 1, suppressed: 0, forcedEvictions: 0 });
   });
 
   it("anomaly (suppression, seed 7): hr-low pair (71->119) joins the spo2 pair", () => {
@@ -306,6 +341,6 @@ describe("AlertEngine against vitals-sim scenarios", () => {
       { state: "raised", ruleTick: 50 },
       { state: "resolved", ruleTick: 102 },
     ]);
-    expect(engine.stats).toEqual({ raised: 1, resolved: 1, suppressed: 0 });
+    expect(engine.stats).toEqual({ raised: 1, resolved: 1, suppressed: 0, forcedEvictions: 0 });
   });
 });

@@ -526,6 +526,14 @@ body {
   border-left-style: var(--mb-alert-resolved-border-style);
 }
 
+/* A decision whose alert has left the server's bounded history: shown, not
+   hidden, and visibly not a live episode. */
+.mb-timeline__row--orphaned {
+  border-left-color: var(--mb-color-border-strong);
+  border-left-style: dotted;
+  color: var(--mb-color-text-muted);
+}
+
 .mb-timeline__head {
   display: flex;
   align-items: center;

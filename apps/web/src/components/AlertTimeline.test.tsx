@@ -131,6 +131,43 @@ describe("AlertTimeline", () => {
     expect(screen.getByRole("button", { name: /Acknowledge/ })).toBeDefined();
   });
 
+  // The server's decision log outlives its bounded alert history, so a
+  // decision can survive its alert. Dropping the row would lose the only
+  // record that anyone triaged the event.
+  it("still shows a decision whose alert the server no longer retains", () => {
+    const orphan: AlertDecisionEvent = {
+      eventId: "e9",
+      alertId: "dev-1:spo2-low:1754000000000:1",
+      deviceId: "dev-1",
+      decision: "acknowledged",
+      actor: "night-shift",
+      recordedAtMs: BASE_MS + 5_000,
+    };
+    timeline({ alerts: [], decisions: new Map([[orphan.alertId, orphan]]) });
+
+    expect(screen.getByText("Decided, alert no longer retained")).toBeDefined();
+    expect(screen.getByText(/Acknowledged by night-shift/)).toBeDefined();
+    expect(screen.getByText(orphan.alertId)).toBeDefined();
+  });
+
+  it("keeps a retained alert out of the orphan list", () => {
+    const decision: AlertDecisionEvent = {
+      eventId: "e1",
+      alertId: "dev-1:spo2-low:1",
+      deviceId: "dev-1",
+      decision: "acknowledged",
+      actor: "night-shift",
+      recordedAtMs: BASE_MS + 5_000,
+    };
+    timeline({
+      alerts: [alert({ alertId: decision.alertId })],
+      decisions: new Map([[decision.alertId, decision]]),
+    });
+
+    expect(screen.queryByText("Decided, alert no longer retained")).toBeNull();
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+  });
+
   it("says so when there is nothing to show", () => {
     timeline({ alerts: [] });
     expect(screen.getByText("No alerts recorded for this device.")).toBeDefined();

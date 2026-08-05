@@ -3,7 +3,7 @@ import type { FastifyPluginAsync } from "fastify";
 import type { AlertDecision } from "@maekbeat/protocol";
 
 import type { DecisionLog } from "./acks";
-import type { AlertEngine } from "./alerts";
+import { parseAlertId, type AlertEngine } from "./alerts";
 import type { IngestCounters } from "./ingest";
 import type { VitalsStore } from "./store";
 import type { DeviceBroadcaster } from "./stream";
@@ -121,7 +121,10 @@ export const readsPlugin: FastifyPluginAsync<ReadsPluginOptions> = async (app, o
         description:
           "Every device seen by ingest, with its current session epoch and " +
           "lastReceivedAtMs — the staleness signal a dashboard renders (C11). " +
-          "The ingest block carries process-lifetime counters.",
+          "The ingest block carries process-lifetime counters. " +
+          "alertsForcedEvicted counts undecided alerts dropped because the " +
+          "history held nothing triaged to drop instead — a backlog nobody is " +
+          "working through.",
         response: {
           200: {
             type: "object",
@@ -158,6 +161,7 @@ export const readsPlugin: FastifyPluginAsync<ReadsPluginOptions> = async (app, o
                     "lastSeq",
                     "lastReceivedAtMs",
                     "duplicatesDropped",
+                    "alertsForcedEvicted",
                   ],
                   properties: {
                     deviceId: { type: "string" },
@@ -166,6 +170,12 @@ export const readsPlugin: FastifyPluginAsync<ReadsPluginOptions> = async (app, o
                     lastSeq: { type: "integer", minimum: 0 },
                     lastReceivedAtMs: { type: "integer" },
                     duplicatesDropped: { type: "integer", minimum: 0 },
+                    alertsForcedEvicted: {
+                      type: "integer",
+                      minimum: 0,
+                      description:
+                        "undecided alerts dropped because the history held only undecided alerts",
+                    },
                   },
                 },
               },
@@ -182,7 +192,13 @@ export const readsPlugin: FastifyPluginAsync<ReadsPluginOptions> = async (app, o
         duplicatesDropped: store.stats.duplicatesDropped,
         sessionsStarted: store.stats.sessionsStarted,
       },
-      devices: store.listDevices(),
+      // The alert history is bounded per device, and a device whose backlog
+      // of undecided alerts has forced a drop says so here rather than losing
+      // the event quietly.
+      devices: store.listDevices().map((device) => ({
+        ...device,
+        alertsForcedEvicted: engine.countersFor(device.deviceId).forcedEvictions,
+      })),
     }),
   );
 
@@ -324,8 +340,12 @@ export const readsPlugin: FastifyPluginAsync<ReadsPluginOptions> = async (app, o
           "`acknowledged` means seen and acted on, `dismissed` means seen and " +
           "judged not actionable — the difference is the false-alarm signal the " +
           "C23 product loop counts. `actor` is asserted by the caller and is " +
-          "not authenticated (C22 owns that). An alert evicted past the " +
-          "100-record history limit can no longer be decided on: 404.",
+          "not authenticated (C22 owns that). The alert record need not still " +
+          "be retained: the log outlives the bounded history, so a decision is " +
+          "accepted for an alertId this device owns whose rule, raise ordinal " +
+          "and raise time this engine could have minted — checked from the id " +
+          "itself, not from the record. A malformed id or an unknown rule is " +
+          "400; another device's id, or one this device never raised, is 404.",
         params: {
           type: "object",
           additionalProperties: false,
@@ -356,13 +376,38 @@ export const readsPlugin: FastifyPluginAsync<ReadsPluginOptions> = async (app, o
       const { deviceId, alertId } = request.params;
       const body = request.body as { decision: AlertDecision; actor: string; note?: string };
 
-      // A decision on an alert this engine cannot show is refused rather than
-      // recorded: either it never raised it, or the alert has aged out past
-      // ALERT_HISTORY_LIMIT. Recording either would put a fiction in the log.
-      if (!engine.listAlerts(deviceId).some((alert) => alert.alertId === alertId)) {
+      // Presence is deliberately NOT the test. The decision log is
+      // authoritative and append-only; the alert history in front of it is a
+      // bounded cache, so an alert that has been evicted must still be
+      // decidable — otherwise the cache could make a real event permanently
+      // un-triageable. What is checked is that the id is well formed and that
+      // this device owns it, which the id itself carries (alerts.ts).
+      const parsed = parseAlertId(alertId);
+      if (parsed === undefined) {
+        return reply
+          .status(400)
+          .send({ statusCode: 400, message: `malformed alertId: ${alertId}` });
+      }
+      if (parsed.deviceId !== deviceId) {
+        return reply.status(404).send({
+          statusCode: 404,
+          message: `alert ${alertId} does not belong to ${deviceId}`,
+        });
+      }
+      // Well formed and owned is not yet plausible. Without the record, three
+      // things are still checkable: the rule is one this engine judges by, the
+      // raise ordinal is one it has actually reached for this device, and the
+      // raise time is not in the future. That keeps decisions on alerts this
+      // server could never have minted out of an append-only log.
+      if (!engine.hasRule(parsed.ruleId)) {
+        return reply
+          .status(400)
+          .send({ statusCode: 400, message: `unknown alert rule: ${parsed.ruleId}` });
+      }
+      if (parsed.ordinal > engine.countersFor(deviceId).raised || parsed.raisedAtMs > Date.now()) {
         return reply
           .status(404)
-          .send({ statusCode: 404, message: `unknown alert: ${alertId} on ${deviceId}` });
+          .send({ statusCode: 404, message: `alert ${alertId} was never raised on ${deviceId}` });
       }
 
       const event = decisions.append({

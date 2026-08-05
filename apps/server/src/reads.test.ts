@@ -1,6 +1,7 @@
 import { alertEventSchema, vitalsFrameSchema, type VitalsFrame } from "@maekbeat/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { ALERT_HISTORY_LIMIT } from "./alerts";
 import { buildApp } from "./app";
 import { loadConfig } from "./config";
 
@@ -35,6 +36,52 @@ async function seededApp() {
 }
 
 describe("GET /devices", () => {
+  // A backlog nobody is triaging is an operational signal, so the count of
+  // alerts dropped for want of a decided one to drop instead is served, not
+  // just held in the engine.
+  it("reports forced alert evictions on the device summary", async () => {
+    const app = await buildApp(loadConfig({ NODE_ENV: "test", LOG_LEVEL: "silent" }), {
+      alertRules: [
+        {
+          id: "spo2-low",
+          metric: "spo2Pct",
+          direction: "low",
+          enterThreshold: 90,
+          exitThreshold: 95,
+          enterCount: 1,
+          exitCount: 1,
+          windowMs: 1_000,
+          cooldownMs: 0,
+        },
+      ],
+    });
+    const frame = (seq: number, spo2Pct: number) => ({
+      v: 1 as const,
+      deviceId: "evict-dev",
+      seq,
+      capturedAtMs: 1_754_000_000_000 + seq,
+      heartRateBpm: 70,
+      spo2Pct,
+      respirationRpm: 14,
+      motion: 0.1,
+    });
+    app.vitalsStore.ingest(frame(0, 97), 1_000);
+
+    // 102 untriaged episodes against a 100-alert history: two must go.
+    let receivedAtMs = 1_000;
+    for (let i = 0; i < ALERT_HISTORY_LIMIT + 2; i++) {
+      app.alertEngine.process({ ...frame(i * 2, 80), receivedAtMs, sessionEpoch: 1 });
+      receivedAtMs += 2_000;
+      app.alertEngine.process({ ...frame(i * 2 + 1, 99), receivedAtMs, sessionEpoch: 1 });
+      receivedAtMs += 2_000;
+    }
+
+    const response = await app.inject({ method: "GET", url: "/devices" });
+    const body = response.json<{ devices: Array<Record<string, unknown>> }>();
+    expect(body.devices[0]?.alertsForcedEvicted).toBe(2);
+    await app.close();
+  });
+
   it("lists device summaries with the staleness signal", async () => {
     const server = await seededApp();
     const response = await server.inject({ method: "GET", url: "/devices" });
@@ -48,6 +95,7 @@ describe("GET /devices", () => {
         frameCount: 3,
         lastSeq: 2,
         lastReceivedAtMs: 9_001,
+        alertsForcedEvicted: 0,
         duplicatesDropped: 0,
       },
     ]);

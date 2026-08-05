@@ -42,7 +42,13 @@ Default rules are DEMO HEURISTICS for a notification demo of the kind used in mo
 | `hr-low`   | < 40 ×5  | ≥ 50 ×8        | 15 s   | 60 s     |
 | `hr-high`  | > 150 ×5 | ≤ 130 ×8       | 15 s   | 60 s     |
 
-Deduped frames never reach the engine, out-of-order arrivals count at their receive time, and session epochs are deliberately ignored — values are judged as they arrive. `GET /devices/:deviceId/alerts` serves the lifecycle records (capped at 100 per device) plus per-device `raised`/`resolved`/`suppressed` counters — the first metrics of the C23 product loop.
+Deduped frames never reach the engine, out-of-order arrivals count at their receive time, and session epochs are deliberately ignored — values are judged as they arrive. `GET /devices/:deviceId/alerts` serves the lifecycle records plus per-device `raised`/`resolved`/`suppressed` counters — the first metrics of the C23 product loop.
+
+### Retention: which alert leaves
+
+The history is bounded at `ALERT_HISTORY_LIMIT` (100 per device) because memory per device must not grow with uptime. Which alert leaves is a judgement rather than a queue position: eviction drops a decided alert — acknowledged or dismissed — before any undecided one ([src/alerts.ts](src/alerts.ts), `evictOne`). Discarding an untriaged alert is the system throwing away exactly what a caregiver has not yet seen, which is the same law as the protocol's transport bounds and the dashboard's min/max decimation.
+
+When every retained alert is undecided the bound still wins and the oldest goes — but that loss is counted as `forcedEvictions`, served as `alertsForcedEvicted` on `GET /devices`, and logged at warn. A backlog with nothing triaged in it means nobody is working through the alerts, which is an operational signal worth raising rather than a detail worth hiding. The decision record is [docs/DECISIONS.md](../../docs/DECISIONS.md) #15 and the hazard it controls is seeded in [docs/regulatory/risk-register.md](../../docs/regulatory/risk-register.md).
 
 ## Dashboard fan-out — `GET /devices/:deviceId/stream` (since C11)
 
@@ -59,6 +65,10 @@ Appends a decision to the device's log ([src/acks.ts](src/acks.ts)) and returns 
 `acknowledged` means seen and acted on; `dismissed` means seen and judged not actionable. Counting the second against the first is the false-alarm signal the C23 product loop asks for, and both appear in the counters on `GET /devices/:deviceId/alerts` alongside the log itself. A decision on an alert this engine never raised is refused with 404 rather than recorded, because a fiction in an audit log is worse than a missing row.
 
 `actor` is asserted by the caller and authenticated by nothing — this server has no identity model at all (see "Declared limits" above). It is provenance, and C22 owns making it a claim worth trusting. Each appended decision is also published to every dashboard watching that device.
+
+Presence of the alert record is deliberately not the test. The log is authoritative and the alert history in front of it is a bounded cache, so a decision is accepted for any well-formed `alertId` this device owns — the id carries its device, so ownership is checkable without the record ([src/alerts.ts](src/alerts.ts), `parseAlertId`). A malformed id is 400 and an id belonging to another device is 404, but an evicted alert stays decidable: a cache must never make a real event permanently un-triageable.
+
+Owned and well formed is not the same as plausible, and without the record three things are still checkable from the id: the rule is one this engine judges by, the raise ordinal is one it has reached for that device, and the raise time is not in the future. An id failing those is refused, which keeps decisions on alerts this server could never have minted out of an append-only log. The residual limit is on the record: counters and history are in-process, so a restart resets what "has reached" means, and this server authenticates nobody.
 
 ## Store and REST reads
 

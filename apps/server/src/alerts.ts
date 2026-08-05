@@ -71,8 +71,66 @@ export const DEFAULT_ALERT_RULES: readonly AlertRuleConfig[] = [
   },
 ];
 
-/** Alerts kept per device; the oldest are evicted beyond this. */
+/**
+ * Alerts kept per device. The bound stays — memory per device must not grow
+ * with uptime — but which alert leaves is a judgement, not a queue position:
+ * see `evictOne` below.
+ */
 export const ALERT_HISTORY_LIMIT = 100;
+
+/**
+ * The alertId format, minted and parsed in one place: `<deviceId>:<ruleId>:
+ * <raisedAtMs>:<ordinal>`. The trailing ordinal (per-device raise count) keeps
+ * ids unique even if two raises land on the same monotonic millisecond.
+ *
+ * Parsing matters beyond curiosity since C13: a decision may arrive for an
+ * alert whose record has already been evicted, and the only way to check the
+ * caller owns it — without the record — is to read the device out of the id.
+ * A `deviceId` may itself contain colons, so the id is read from the right.
+ */
+/** Rule ids appear inside alertIds, so the id charset is one definition. */
+export const RULE_ID_PATTERN = /^[a-z0-9-]+$/;
+
+export function alertIdFor(
+  deviceId: string,
+  ruleId: string,
+  raisedAtMs: number,
+  ordinal: number,
+): string {
+  return `${deviceId}:${ruleId}:${raisedAtMs}:${ordinal}`;
+}
+
+export interface ParsedAlertId {
+  deviceId: string;
+  ruleId: string;
+  raisedAtMs: number;
+  ordinal: number;
+}
+
+/** The parts of a well-formed alertId, or undefined if it is not one. */
+export function parseAlertId(alertId: string): ParsedAlertId | undefined {
+  const parts = alertId.split(":");
+  if (parts.length < 4) return undefined;
+
+  const ordinal = Number(parts[parts.length - 1]);
+  const raisedAtMs = Number(parts[parts.length - 2]);
+  const ruleId = parts[parts.length - 3] ?? "";
+  const deviceId = parts.slice(0, parts.length - 3).join(":");
+
+  const positiveInt = (value: number) => Number.isSafeInteger(value) && value > 0;
+  if (!positiveInt(ordinal) || !positiveInt(raisedAtMs)) return undefined;
+  if (!RULE_ID_PATTERN.test(ruleId)) return undefined;
+  if (deviceId.length === 0 || deviceId.length > 64) return undefined;
+
+  // The round trip is the definition of well-formed. Number() would otherwise
+  // accept " 1", "0x1", "1e3" and "1.0" as the same ordinal, and the route
+  // records the id it was given — so a non-canonical spelling would produce a
+  // decision that never matches the alert it was meant to judge, leaving the
+  // alert undecided, evictable, and the counters inflated.
+  if (alertIdFor(deviceId, ruleId, raisedAtMs, ordinal) !== alertId) return undefined;
+
+  return { deviceId, ruleId, raisedAtMs, ordinal };
+}
 
 /** Defensive cap on window samples, independent of windowMs. */
 const MAX_WINDOW_SAMPLES = 512;
@@ -81,6 +139,12 @@ export interface AlertCounters {
   raised: number;
   resolved: number;
   suppressed: number;
+  /**
+   * Undecided alerts dropped because the history was full of undecided
+   * alerts. Never silent: a full undecided backlog means nobody is triaging,
+   * which is itself the operational signal worth raising.
+   */
+  forcedEvictions: number;
 }
 
 interface WindowSample {
@@ -108,6 +172,13 @@ interface DeviceAlertState {
 }
 
 function validateRule(rule: AlertRuleConfig): void {
+  if (!RULE_ID_PATTERN.test(rule.id)) {
+    // The rule id travels inside every alertId this rule raises, and an id the
+    // decision route cannot parse is an alert nobody can ever acknowledge.
+    throw new RangeError(
+      `rule ${rule.id}: id must match ${String(RULE_ID_PATTERN)} — it is part of every alertId`,
+    );
+  }
   const hysteresisOk =
     rule.direction === "low"
       ? rule.exitThreshold > rule.enterThreshold
@@ -129,12 +200,35 @@ function validateRule(rule: AlertRuleConfig): void {
  * Session epochs are ignored deliberately: values are judged as they arrive,
  * whatever session they belong to.
  */
+export interface AlertEngineOptions {
+  /**
+   * Whether an alert has been triaged. Injected rather than imported so the
+   * engine keeps no reference to the decision log: eviction asks a question,
+   * it does not own the answer.
+   */
+  isDecided?: (deviceId: string, alertId: string) => boolean;
+  /** Called when an undecided alert had to be dropped anyway. */
+  onForcedEviction?: (info: { deviceId: string; alertId: string }) => void;
+}
+
 export class AlertEngine {
   private readonly rules: readonly AlertRuleConfig[];
   private readonly devices = new Map<string, DeviceAlertState>();
-  readonly stats: AlertCounters = { raised: 0, resolved: 0, suppressed: 0 };
+  private readonly isDecided: (deviceId: string, alertId: string) => boolean;
+  private readonly onForcedEviction: (info: { deviceId: string; alertId: string }) => void;
+  readonly stats: AlertCounters = {
+    raised: 0,
+    resolved: 0,
+    suppressed: 0,
+    forcedEvictions: 0,
+  };
 
-  constructor(rules: readonly AlertRuleConfig[] = DEFAULT_ALERT_RULES) {
+  constructor(
+    rules: readonly AlertRuleConfig[] = DEFAULT_ALERT_RULES,
+    options: AlertEngineOptions = {},
+  ) {
+    this.isDecided = options.isDecided ?? (() => false);
+    this.onForcedEviction = options.onForcedEviction ?? (() => {});
     const ids = new Set<string>();
     for (const rule of rules) {
       validateRule(rule);
@@ -244,6 +338,11 @@ export class AlertEngine {
     return transitions;
   }
 
+  /** Whether a rule id is one this engine actually judges by. */
+  hasRule(ruleId: string): boolean {
+    return this.rules.some((rule) => rule.id === ruleId);
+  }
+
   /** Alert history for one device, oldest first; empty for unknown devices. */
   listAlerts(deviceId: string): AlertEvent[] {
     const device = this.devices.get(deviceId);
@@ -253,8 +352,38 @@ export class AlertEngine {
   countersFor(deviceId: string): AlertCounters {
     const device = this.devices.get(deviceId);
     return device === undefined
-      ? { raised: 0, resolved: 0, suppressed: 0 }
+      ? { raised: 0, resolved: 0, suppressed: 0, forcedEvictions: 0 }
       : { ...device.counters };
+  }
+
+  /**
+   * Drops one alert to stay under the bound, decided ones first. Discarding an
+   * alert nobody has triaged is the system throwing away exactly what a
+   * caregiver has not yet seen — the same law as the protocol's transport
+   * bounds and the chart's min/max decimation: never lose the event.
+   *
+   * If every retained alert is undecided the oldest still goes, because the
+   * bound is real — but that loss is counted and announced, never silent.
+   */
+  private evictOne(deviceId: string, device: DeviceAlertState): void {
+    // Resolved AND decided: an episode someone acknowledged while it was still
+    // running is the one they are acting on right now, so it is not the safe
+    // thing to forget — and dropping it would leave a later `resolved` event
+    // pointing at a record the history no longer holds.
+    const decidedIndex = device.alerts.findIndex(
+      (alert) => alert.state === "resolved" && this.isDecided(deviceId, alert.alertId),
+    );
+    if (decidedIndex >= 0) {
+      device.alerts.splice(decidedIndex, 1);
+      return;
+    }
+
+    const dropped = device.alerts.shift();
+    device.counters.forcedEvictions += 1;
+    this.stats.forcedEvictions += 1;
+    if (dropped !== undefined) {
+      this.onForcedEviction({ deviceId, alertId: dropped.alertId });
+    }
   }
 
   private raise(
@@ -268,7 +397,7 @@ export class AlertEngine {
     const alert: AlertEvent = {
       // The trailing ordinal (per-device raise count) keeps ids unique even if
       // two raises land on the same monotonic millisecond.
-      alertId: `${deviceId}:${rule.id}:${now}:${device.counters.raised + 1}`,
+      alertId: alertIdFor(deviceId, rule.id, now, device.counters.raised + 1),
       deviceId,
       metric: rule.metric,
       direction: rule.direction,
@@ -282,11 +411,14 @@ export class AlertEngine {
     // recoveries observed AFTER the raise, not stale pre-raise samples.
     state.window = [];
     device.alerts.push(alert);
-    if (device.alerts.length > ALERT_HISTORY_LIMIT) {
-      device.alerts.shift();
-    }
     device.counters.raised += 1;
     this.stats.raised += 1;
+    // Counters first: eviction calls injected code, and a throw from it must
+    // not leave the ordinal unincremented — the next raise would mint a
+    // duplicate alertId, and one decision would then mark two alerts decided.
+    if (device.alerts.length > ALERT_HISTORY_LIMIT) {
+      this.evictOne(deviceId, device);
+    }
     return { ...alert };
   }
 
@@ -296,7 +428,7 @@ export class AlertEngine {
       device = {
         rules: new Map(),
         alerts: [],
-        counters: { raised: 0, resolved: 0, suppressed: 0 },
+        counters: { raised: 0, resolved: 0, suppressed: 0, forcedEvictions: 0 },
       };
       this.devices.set(deviceId, device);
     }
