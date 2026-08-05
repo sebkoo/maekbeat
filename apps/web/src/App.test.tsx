@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
-import type { MaekbeatApi } from "./api/client";
+import type { DeviceStreamHandlers, MaekbeatApi } from "./api/client";
 import { ApiError } from "./api/http";
 import { AppShell } from "./components/AppShell";
 import { ApiProvider, useApi } from "./data/api-context";
@@ -105,6 +105,10 @@ const ALERTS = {
   ],
 };
 
+/** Handlers of the most recent subscription, so a test can push frames. */
+let streamHandlers: DeviceStreamHandlers | undefined;
+let openSockets = 0;
+
 /** A client that answers from fixtures; overrides replace one route at a time. */
 function fakeApi(overrides: Partial<MaekbeatApi> = {}): MaekbeatApi {
   return {
@@ -113,6 +117,18 @@ function fakeApi(overrides: Partial<MaekbeatApi> = {}): MaekbeatApi {
     listDevices: async () => DEVICE_LIST,
     readFrames: async () => FRAMES,
     readAlerts: async () => ALERTS,
+    subscribe: (_deviceId, handlers) => {
+      streamHandlers = handlers;
+      openSockets += 1;
+      // A fake socket that opens immediately, as the real transport reports.
+      handlers.onState("live");
+      return {
+        close: () => {
+          openSockets -= 1;
+          streamHandlers = undefined;
+        },
+      };
+    },
     ...overrides,
   };
 }
@@ -188,6 +204,24 @@ describe("app shell", () => {
     screen.getByText("recovered");
     noise.mockRestore();
   });
+
+  it("gives a thrown value that is not an Error a message anyway", () => {
+    function BadThrow(): never {
+      // eslint has no say here; libraries do throw strings.
+      throw "socket refused";
+    }
+    const noise = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(
+      <MemoryRouter>
+        <AppShell>
+          <BadThrow />
+        </AppShell>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("alert").textContent).toContain("socket refused");
+    noise.mockRestore();
+  });
 });
 
 describe("read states", () => {
@@ -237,7 +271,7 @@ describe("read states", () => {
 });
 
 describe("device detail", () => {
-  it("shows the latest frame, the alert lifecycle, and an honest chart placeholder", async () => {
+  it("shows the latest frame, the alert lifecycle, and the two charts", async () => {
     renderApp(fakeApi(), "/devices/sim-dev-1");
 
     await screen.findByRole("heading", { level: 1, name: "sim-dev-1" });
@@ -258,7 +292,70 @@ describe("device detail", () => {
     ]);
     expect(badges.map((node) => node.textContent)).toEqual(["resolved", "ongoing", "raised"]);
 
-    screen.getByText(/The live chart lands at C11/);
+    // Small multiples, not a dual axis: one chart per metric, same time axis.
+    const charts = screen.getAllByRole("img").map((node) => node.getAttribute("aria-label"));
+    expect(charts).toHaveLength(2);
+    expect(charts[0]).toContain("SpO2 in %");
+    expect(charts[1]).toContain("Heart rate in bpm");
+  });
+
+  it("appends what the socket pushes without a re-read", async () => {
+    renderApp(fakeApi(), "/devices/sim-dev-1");
+    await screen.findByRole("heading", { level: 1, name: "sim-dev-1" });
+    expect(screen.getByText("live")).toBeDefined();
+
+    act(() =>
+      streamHandlers?.onFrame({
+        ...FRAMES.frames[1]!,
+        seq: 130,
+        capturedAtMs: FRAMES.frames[1]!.capturedAtMs + 1_000,
+        receivedAtMs: FRAMES.frames[1]!.receivedAtMs + 1_000,
+        heartRateBpm: 81,
+      }),
+    );
+
+    await waitFor(() =>
+      expect(
+        [...document.querySelectorAll(".mb-metric__value")].map((node) => node.textContent)[0],
+      ).toBe("81bpm"),
+    );
+  });
+
+  it("shows the connection state next to the data it explains", async () => {
+    renderApp(fakeApi(), "/devices/sim-dev-1");
+    await screen.findByRole("heading", { level: 1, name: "sim-dev-1" });
+
+    act(() => streamHandlers?.onState("reconnecting"));
+    expect(document.querySelector(".mb-conn-badge")?.textContent).toBe("reconnecting");
+
+    act(() => streamHandlers?.onState("disconnected"));
+    const badge = document.querySelector(".mb-conn-badge");
+    expect(badge?.textContent).toBe("disconnected");
+    // The word is the cue; the palette repeats it, never replaces it.
+    expect(badge?.getAttribute("data-alert-state")).toBe("raised");
+  });
+
+  it("admits to dropping messages the contract rejected", async () => {
+    renderApp(fakeApi(), "/devices/sim-dev-1");
+    await screen.findByRole("heading", { level: 1, name: "sim-dev-1" });
+
+    act(() => streamHandlers?.onInvalidMessage?.());
+    await screen.findByText(/1 malformed message dropped/);
+
+    act(() => streamHandlers?.onInvalidMessage?.());
+    await screen.findByText(/2 malformed messages dropped/);
+  });
+
+  // Names what it checks: the route closes its subscription. That the
+  // transport then leaves no socket or timer behind is stream.test.ts's job.
+  it("closes its subscription when the route unmounts", async () => {
+    openSockets = 0;
+    const { unmount } = renderApp(fakeApi(), "/devices/sim-dev-1");
+    await screen.findByRole("heading", { level: 1, name: "sim-dev-1" });
+    expect(openSockets).toBe(1);
+
+    unmount();
+    expect(openSockets).toBe(0);
   });
 
   it("reports a device the server does not know", async () => {
@@ -303,7 +400,7 @@ describe("device detail", () => {
 
     fireEvent.click(await screen.findByRole("link", { name: "sim-dev-1" }));
     await screen.findByRole("heading", { level: 1, name: "sim-dev-1" });
-    screen.getByText(/Latest of 2 frames/);
+    screen.getByText(/Live over the fan-out socket/);
   });
 });
 
@@ -360,6 +457,24 @@ describe("styles are applied, not merely defined", () => {
     cleanup();
 
     renderApp(fakeApi(), "/devices/sim-dev-1");
+    await screen.findByRole("heading", { level: 1, name: "sim-dev-1" });
+    collect();
+    cleanup();
+
+    // A window with a hole in it, so the gap band is among the classes checked.
+    // The threshold is derived from the median interval, so the series needs
+    // enough 1 Hz samples for a 40 s hole to stand out as one.
+    const run = (count: number, seq0: number, startMs: number) =>
+      Array.from({ length: count }, (_, i) => ({
+        ...FRAMES.frames[1]!,
+        seq: seq0 + i,
+        capturedAtMs: startMs + i * 1_000,
+        receivedAtMs: startMs + i * 1_000 + 500,
+      }));
+    const firstRun = run(20, 200, FRAMES.frames[1]!.capturedAtMs);
+    const gappedFrames = [...firstRun, ...run(10, 300, firstRun[19]!.capturedAtMs + 40_000)];
+    const gapped = { ...FRAMES, count: gappedFrames.length, frames: gappedFrames };
+    renderApp(fakeApi({ readFrames: async () => gapped }), "/devices/sim-dev-1");
     await screen.findByRole("heading", { level: 1, name: "sim-dev-1" });
     collect();
 

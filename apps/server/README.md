@@ -1,6 +1,6 @@
 # @maekbeat/server
 
-The Maekbeat API server, C5–C9 of [docs/ROADMAP.md](../../docs/ROADMAP.md): WebSocket vitals ingest validated against [@maekbeat/protocol](../../packages/protocol), a bounded per-device ring buffer, a sliding-window alert engine, and REST reads — all in the OpenAPI document. Dashboard fan-out lands at C11.
+The Maekbeat API server, C5–C11 of [docs/ROADMAP.md](../../docs/ROADMAP.md): WebSocket vitals ingest validated against [@maekbeat/protocol](../../packages/protocol), a bounded per-device ring buffer, a sliding-window alert engine, REST reads, and the WebSocket fan-out that feeds [apps/web](../web) — all in the OpenAPI document.
 
 ## Run it
 
@@ -12,7 +12,7 @@ pnpm --filter @maekbeat/server test:coverage   # v8 coverage + threshold gate (i
 pnpm --filter @maekbeat/server typecheck
 ```
 
-[scripts/demo.ts](scripts/demo.ts) streams 130 vitals-sim anomaly frames through a real WebSocket client at 40x demo time (alert windows scaled to match), exercises the duplicate, invalid-frame, and reboot-session paths, and reads frames and the alert lifecycle back over REST. The anomaly raises one spo2-low alert near tick 40 and resolves it near tick 93 — one pair, not one alert per bad tick.
+[scripts/demo.ts](scripts/demo.ts) streams 130 vitals-sim anomaly frames through a real WebSocket client at 40x demo time (alert windows scaled to match), exercises the duplicate, invalid-frame, and reboot-session paths, and reads frames and the alert lifecycle back over REST. The anomaly raises one spo2-low alert near tick 40 and resolves it near tick 93 — one pair, not one alert per bad tick. Since C11 it also attaches a dashboard subscriber to the fan-out socket and prints what that subscriber received: 131 frames and 2 alert transitions, with duplicates and rejects absent by construction.
 
 ## WebSocket ingest — `GET /ingest`
 
@@ -42,6 +42,14 @@ Default rules are DEMO HEURISTICS for a notification demo of the kind used in mo
 
 Deduped frames never reach the engine, out-of-order arrivals count at their receive time, and session epochs are deliberately ignored — values are judged as they arrive. `GET /devices/:deviceId/alerts` serves the lifecycle records (capped at 100 per device) plus per-device `raised`/`resolved`/`suppressed` counters — the first metrics of the C23 product loop.
 
+## Dashboard fan-out — `GET /devices/:deviceId/stream` (since C11)
+
+The push leg of [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) stage 7, in its dev form: an in-process publisher keyed by `deviceId` ([src/stream.ts](src/stream.ts)), with the Lambda fan-out still the target form at C19. Server to dashboard only — a subscriber that sends anything is ignored, because frames enter this system through `/ingest` and nowhere else.
+
+On subscribe the socket sends `{type:"ready", deviceId, serverTimeMs, ringCapacity}`, then one `{type:"frame", frame}` per accepted frame and one `{type:"alert", alert}` per lifecycle transition, both shaped by `streamMessageSchema` in [@maekbeat/protocol](../../packages/protocol). Publishing happens after the engine has judged the frame, so a dashboard never sees an alert before the frame that raised it, and deduped frames never reach it at all.
+
+Subscribing to a device the server has never seen is allowed and stays silent until its first frame — a monitor that had to wait for data before attaching would miss the data it was waiting for. A subscriber whose socket dies mid-send is dropped without disturbing ingest for that device, and the close handler unsubscribes it. `ringCapacity` is sent so a client knows the largest window a reconnect could recover; anything evicted past it is gone, and [apps/web](../web) renders that as a gap rather than a join.
+
 ## Store and REST reads
 
 The store ([src/store.ts](src/store.ts)) keeps at most `RING_CAPACITY` frames per device in arrival order, evicting the oldest arrival first; retransmits of evicted frames still dedupe while their `seq` stays inside the reorder window. Reads sort by `(capturedAtMs, seq)` at query time, so out-of-order arrivals sit in the buffer as they came and leave in capture order.
@@ -49,6 +57,7 @@ The store ([src/store.ts](src/store.ts)) keeps at most `RING_CAPACITY` frames pe
 - `GET /devices` — device summaries (`sessionEpoch`, `frameCount`, `lastSeq`, `lastReceivedAtMs` as the staleness signal, `duplicatesDropped`) plus process-lifetime ingest counters.
 - `GET /devices/:deviceId/frames?since&limit` — frames from the window; `since` is an inclusive `capturedAtMs` bound, `limit` defaults to 100 (max 1000). Unknown device: 404.
 - `GET /devices/:deviceId/alerts` — alert lifecycle records + counters (see [src/reads.ts](src/reads.ts)); the alert shape mirrors `alertEventSchema` from [@maekbeat/protocol](../../packages/protocol), pinned by a drift test.
+- `GET /devices/:deviceId/stream` — the WebSocket fan-out above (see [src/stream.ts](src/stream.ts)).
 - `GET /healthz` — status, uptime, version. Swagger UI at `/docs` when `NODE_ENV=development`; [src/openapi.test.ts](src/openapi.test.ts) pins the exact route list.
 
 ## Test map
@@ -68,6 +77,7 @@ One row per test file, mapping it to the behaviors it pins — the file-to-behav
 | [src/isolation.test.ts](src/isolation.test.ts)             | parallel sockets with interleaved devices: no window, session, or counter bleed across devices                             |
 | [src/journey.test.ts](src/journey.test.ts)                 | vitals-sim → WS client → ingest → engine → REST anomaly journey, DEFAULT_ALERT_RULES unscaled                              |
 | [src/reads.test.ts](src/reads.test.ts)                     | REST read ordering, since/limit, 404 shape, wire-contract drift guards                                                     |
+| [src/stream.test.ts](src/stream.test.ts)                   | fan-out isolation per device, unsubscribe on close, a broken subscriber not breaking ingest, frame-before-its-alert order  |
 | [src/openapi.test.ts](src/openapi.test.ts)                 | exact route surface in the OpenAPI document, Swagger UI mounted in development only                                        |
 
 Coverage is measured with `pnpm --filter @maekbeat/server test:coverage` ([vitest.config.ts](vitest.config.ts), v8 provider, all of src/ minus tests in the denominator — including the uncovered process entry [src/main.ts](src/main.ts); the one file outside the gate is the demo wiring, [scripts/demo.ts](scripts/demo.ts)). Since C9 the config carries thresholds set just under the measured floor, and the CI tests job runs the coverage-enabled suite, so a regression fails the build. Thresholds are a ratchet — they move only up, never down, never via new exclusions or narrowed globs (policy: [CLAUDE.md](../../CLAUDE.md)).

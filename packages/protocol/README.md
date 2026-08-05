@@ -69,6 +69,21 @@ the clock policy fixed in docs/ARCHITECTURE.md (drift shifts charts, never
 alerts). Like the vitals frame, the schema is strict: unknown keys are
 rejected.
 
+## Fan-out messages (since C11)
+
+`streamMessageSchema` (src/stream.ts) is the second additive exercise of the
+evolution policy: new schemas, the vitals frame untouched, `v` stays `1`. It
+types the server-to-dashboard direction, which `/ingest` does not cover.
+
+- `storedVitalsFrameSchema` — the wire frame plus the two server stamps,
+  `receivedAtMs` and `sessionEpoch`. Defined here because the shape is now on
+  the wire in both directions; apps/server and apps/web both read it from here
+  rather than restating it.
+- `streamMessageSchema` — a discriminated union of `ready` (sent once on
+  subscribe, carrying the server's `ringCapacity`), `frame`, and `alert`. An
+  unknown `type` is rejected, so a receiver never renders a message it does not
+  understand.
+
 ## Commands
 
 ```sh

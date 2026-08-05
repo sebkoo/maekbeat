@@ -235,7 +235,10 @@ body {
   line-height: 1;
 }
 
-.mb-alert-badge[data-alert-state="raised"] {
+/* One assignment per state, shared by the alert badge and the C11 connection
+   badge: the palette is borrowed by both, defined once. */
+.mb-alert-badge[data-alert-state="raised"],
+.mb-conn-badge[data-alert-state="raised"] {
   --badge-fg: var(--mb-alert-raised-fg);
   --badge-bg: var(--mb-alert-raised-bg);
   --badge-border: var(--mb-alert-raised-border);
@@ -243,7 +246,8 @@ body {
   --badge-mark: var(--mb-alert-raised-mark);
 }
 
-.mb-alert-badge[data-alert-state="ongoing"] {
+.mb-alert-badge[data-alert-state="ongoing"],
+.mb-conn-badge[data-alert-state="ongoing"] {
   --badge-fg: var(--mb-alert-ongoing-fg);
   --badge-bg: var(--mb-alert-ongoing-bg);
   --badge-border: var(--mb-alert-ongoing-border);
@@ -251,7 +255,8 @@ body {
   --badge-mark: var(--mb-alert-ongoing-mark);
 }
 
-.mb-alert-badge[data-alert-state="resolved"] {
+.mb-alert-badge[data-alert-state="resolved"],
+.mb-conn-badge[data-alert-state="resolved"] {
   --badge-fg: var(--mb-alert-resolved-fg);
   --badge-bg: var(--mb-alert-resolved-bg);
   --badge-border: var(--mb-alert-resolved-border);
@@ -286,15 +291,129 @@ body {
   text-align: right;
 }
 
-/* Placeholder for a surface a later commit fills — labelled with its commit
-   number, never dressed up as working UI. */
-.mb-placeholder {
-  border: 1px dashed var(--mb-color-border-strong);
-  border-radius: var(--mb-radius-md);
-  color: var(--mb-color-text-muted);
+/* Chart (C11). Every paint comes from a class, never from a fill or stroke
+   attribute, so the colour gate in tokens.test.ts still covers the chart. There
+   is no transition anywhere in this block on purpose: an animated line would
+   put the newest sample on screen later than it arrived. */
+.mb-chart {
+  margin: 0 0 var(--mb-space-5);
+}
+
+.mb-chart:last-of-type {
+  margin-bottom: 0;
+}
+
+.mb-chart__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--mb-space-2);
   font-size: var(--mb-text-sm);
-  padding: var(--mb-space-6) var(--mb-space-4);
-  text-align: center;
+  font-weight: var(--mb-weight-medium);
+}
+
+.mb-chart__unit {
+  color: var(--mb-color-text-muted);
+  font-size: var(--mb-text-xs);
+}
+
+.mb-chart__latest {
+  margin-left: auto;
+  font-family: var(--mb-font-mono);
+  font-size: var(--mb-text-lg);
+  font-variant-numeric: tabular-nums;
+}
+
+.mb-chart__plot {
+  display: block;
+  width: 100%;
+  height: 10.5rem;
+  border: 1px solid var(--mb-color-border);
+  border-radius: var(--mb-radius-md);
+  background: var(--mb-color-surface-sunken);
+}
+
+.mb-chart__line {
+  fill: none;
+  stroke: var(--mb-color-accent);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+/* A hole in coverage is drawn as a hole: hatched band, no line across it. */
+.mb-chart__gap {
+  fill: var(--mb-color-border);
+  opacity: 0.45;
+}
+
+/* Alert marks mirror the badge encoding of docs/DECISIONS.md #12: the dash
+   pattern repeats the badge's border style, so the three states stay apart in
+   greyscale. */
+.mb-chart__alert {
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.mb-chart__alert[data-alert-state="raised"] {
+  stroke: var(--mb-alert-raised-border);
+}
+
+.mb-chart__alert[data-alert-state="ongoing"] {
+  stroke: var(--mb-alert-ongoing-border);
+  stroke-dasharray: 5 3;
+}
+
+.mb-chart__alert[data-alert-state="resolved"] {
+  stroke: var(--mb-alert-resolved-border);
+  stroke-dasharray: 1 3;
+}
+
+.mb-chart__axis {
+  stroke: var(--mb-color-border-strong);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.mb-chart__tick {
+  fill: var(--mb-color-text-muted);
+  font-family: var(--mb-font-mono);
+  font-size: var(--mb-text-xs);
+}
+
+.mb-chart__note {
+  margin: var(--mb-space-1) 0 0;
+  color: var(--mb-color-text-muted);
+  font-size: var(--mb-text-xs);
+}
+
+.mb-page__heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--mb-space-3);
+}
+
+/* Connection state: same three cues as the alert badge, its own class so the
+   alert palette is borrowed rather than overloaded. */
+.mb-conn-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mb-space-2);
+  border: 2px var(--badge-border-style) var(--badge-border);
+  border-radius: var(--mb-radius-pill);
+  background: var(--badge-bg);
+  color: var(--badge-fg);
+  padding: var(--mb-space-1) var(--mb-space-3);
+  font-size: var(--mb-text-xs);
+  font-weight: var(--mb-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.mb-conn-badge::before {
+  content: var(--badge-mark);
+  font-size: var(--mb-text-sm);
+  line-height: 1;
 }
 
 /* Loading, empty, and error are first-class states with the same weight as

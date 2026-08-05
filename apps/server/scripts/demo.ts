@@ -53,6 +53,21 @@ await new Promise<void>((resolve, reject) => {
   ws.once("error", reject);
 });
 
+// A dashboard subscriber (C11 fan-out), standing in for apps/web: it receives
+// what the browser receives, over the same route and the same contract.
+const dashboard = new WebSocket(`ws://127.0.0.1:${port}/devices/${DEVICE_ID}/stream`);
+const pushed = { frames: 0, alerts: 0, ringCapacity: 0 };
+dashboard.on("message", (data) => {
+  const message = JSON.parse(String(data)) as { type: string; [key: string]: unknown };
+  if (message.type === "ready") pushed.ringCapacity = message.ringCapacity as number;
+  if (message.type === "frame") pushed.frames += 1;
+  if (message.type === "alert") pushed.alerts += 1;
+});
+await new Promise<void>((resolve, reject) => {
+  dashboard.once("open", () => resolve());
+  dashboard.once("error", reject);
+});
+
 function sendAndAwaitReply(payload: string): Promise<Record<string, unknown>> {
   return new Promise((resolve) => {
     ws.once("message", (data) => resolve(JSON.parse(String(data)) as Record<string, unknown>));
@@ -148,6 +163,12 @@ for (const alert of alertsRead.alerts) {
   );
 }
 
+console.log(
+  `demo: dashboard socket received ${pushed.frames} frames and ${pushed.alerts} alert ` +
+    `transitions (ring capacity ${pushed.ringCapacity}); duplicates and rejects never reach it`,
+);
+
+dashboard.close();
 ws.close();
 await app.close();
 console.log("demo: done — pipeline round trip complete");

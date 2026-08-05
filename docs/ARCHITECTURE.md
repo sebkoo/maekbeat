@@ -4,7 +4,7 @@ Maekbeat's scaling chain, stage by stage, with the failure modes each stage must
 
 ## What exists today
 
-Two packages are real: [packages/protocol](../packages/protocol) — the wire contract, a strict zod `vitalsFrameSchema` plus the additive `alertEventSchema` (C7) — and [packages/vitals-sim](../packages/vitals-sim), a deterministic synthetic vitals generator whose exact output is golden-pinned in packages/vitals-sim/golden/. The server in [apps/server](../apps/server) is real through stage 5: WebSocket ingest validating every frame (C6), the in-process ring buffer (C6), and the sliding-window alert engine (C7) — the runnable pipeline apps/server/scripts/demo.ts drives frames to a raised-and-resolved alert end to end. The dashboard surface itself exists since C10 ([apps/web](../apps/web)) and reads the REST routes once per route mount; the push leg that makes it live, and the notification stage after it, stay planned and carry their commit numbers in the table below.
+Two packages are real: [packages/protocol](../packages/protocol) — the wire contract, a strict zod `vitalsFrameSchema` plus the additive `alertEventSchema` (C7) — and [packages/vitals-sim](../packages/vitals-sim), a deterministic synthetic vitals generator whose exact output is golden-pinned in packages/vitals-sim/golden/. The server in [apps/server](../apps/server) is real through stage 5: WebSocket ingest validating every frame (C6), the in-process ring buffer (C6), and the sliding-window alert engine (C7) — the runnable pipeline apps/server/scripts/demo.ts drives frames to a raised-and-resolved alert end to end. The dashboard exists since C10 ([apps/web](../apps/web)) and streams since C11 — the fan-out socket of apps/server/src/stream.ts pushes each accepted frame and each alert transition to the device page, which seeds from REST and re-reads the window on every reconnect — while the notification stage after it stays planned and carries its commit number in the table below.
 
 ## Scaling chain
 
@@ -27,7 +27,7 @@ flowchart LR
 | 4   | Event queue            | in-process ring buffer      | SQS                                                                | ring buffer shipped — C6 (apps/server/src/store.ts); SQS is target architecture, no commit assigned |
 | 5   | Stream processor       | sliding-window alert engine | same, consuming SQS                                                | dev form shipped — C7 (apps/server/src/alerts.ts); SQS consumption is target                        |
 | 6   | Storage                | ring-buffer window only     | S3 raw archive + time-series read model                            | ring-buffer window shipped — C6; S3 + time-series — C19                                             |
-| 7   | Dashboard fan-out      | WS push to apps/web         | Lambda fan-out                                                     | planned — C11, C19                                                                                  |
+| 7   | Dashboard fan-out      | WS push to apps/web         | Lambda fan-out                                                     | dev form shipped — C11 (apps/server/src/stream.ts, apps/web); Lambda fan-out — C19                  |
 | 8   | Caregiver notification | iOS notification            | same, triggered via fan-out                                        | planned — C16, C19                                                                                  |
 
 Time-series note: the S3 raw archive (planned — C19) stores frames as NDJSON, whose frame-line serialization is already pinned by the golden fixtures in packages/vitals-sim/golden/ (fixtures additionally carry a header line the archive will not). Whether a dedicated time-series store fronts dashboard history is a C19 decision, made after the k6 profile shows the real read pattern; until then dev reads come from the ring-buffer window.
@@ -50,7 +50,7 @@ sequenceDiagram
   P->>C: notify (under 5 s end-to-end TARGET)
 ```
 
-The ingest and processing legs are real since C6–C7 — receivedAtMs stamp and session-scoped dedupe (apps/server/src/ingest.ts, store.ts), the ring buffer as enqueue target, and the alert engine judging each accepted frame (apps/server/src/alerts.ts) — while gateway transport (C14–C15), dashboard fan-out (C11), and notification (C16) remain unbuilt. Both TARGETs are end-to-end paths, defined precisely in the budget table below, not budgets for the single leg they annotate.
+The ingest and processing legs are real since C6–C7 — receivedAtMs stamp and session-scoped dedupe (apps/server/src/ingest.ts, store.ts), the ring buffer as enqueue target, and the alert engine judging each accepted frame (apps/server/src/alerts.ts) — and the fan-out leg since C11 (apps/server/src/stream.ts), while gateway transport (C14–C15) and notification (C16) remain unbuilt. Both TARGETs are end-to-end paths, defined precisely in the budget table below, not budgets for the single leg they annotate.
 
 ## Latency budgets — all TARGETS
 
@@ -63,13 +63,13 @@ Neither number has been measured; both are budget targets per [ROADMAP.md](ROADM
 
 ## Failure modes
 
-| Failure mode              | Owning stage(s)           | Mechanism                                                | Status                                                    |
-| ------------------------- | ------------------------- | -------------------------------------------------------- | --------------------------------------------------------- |
-| duplicate packets         | ingest (3)                | `frameKey` dedupe                                        | shipped — C6 (apps/server/src/store.ts, session-scoped)   |
-| delayed / out-of-order    | ingest (3), processor (5) | identity never by time; order by (capturedAtMs, seq)     | shipped — C6 (read ordering), C7 (receive-time windows)   |
-| clock drift               | ingest (3), processor (5) | `receivedAtMs − capturedAtMs` delta; server-time windows | shipped — C6 (stamping), C7 (windows on receive time)     |
-| device disconnect         | ingest (3), gateway (2)   | staleness signal; BLE state machine                      | lastReceivedAtMs shipped — C6; rendering — C11; BLE — C15 |
-| offline buffering, replay | gateway (2)               | on-device buffer, replay in seq order, idempotent        | dedupe shipped — C6 (windowed); gateway buffer — C15      |
+| Failure mode              | Owning stage(s)           | Mechanism                                                | Status                                                                  |
+| ------------------------- | ------------------------- | -------------------------------------------------------- | ----------------------------------------------------------------------- |
+| duplicate packets         | ingest (3)                | `frameKey` dedupe                                        | shipped — C6 (apps/server/src/store.ts, session-scoped)                 |
+| delayed / out-of-order    | ingest (3), processor (5) | identity never by time; order by (capturedAtMs, seq)     | shipped — C6 (read ordering), C7 (receive-time windows)                 |
+| clock drift               | ingest (3), processor (5) | `receivedAtMs − capturedAtMs` delta; server-time windows | shipped — C6 (stamping), C7 (windows on receive time)                   |
+| device disconnect         | ingest (3), gateway (2)   | staleness signal; BLE state machine                      | lastReceivedAtMs shipped — C6; rendered as a chart gap — C11; BLE — C15 |
+| offline buffering, replay | gateway (2)               | on-device buffer, replay in seq order, idempotent        | dedupe shipped — C6 (windowed); gateway buffer — C15                    |
 
 The stages absent from the owning column answer by construction. The simulator (1) emits strictly monotonic `seq` and synthetic tick time, so it cannot itself produce duplicates, reordering, or drift — pinned by the golden fixtures in packages/vitals-sim/golden/ — while queue, storage, fan-out, and notification (4, 6, 7, 8) consume frames only after ingest has deduplicated and receive-stamped them, so all five modes are resolved upstream of their input. What those downstream stages still owe — delivery latency under load — is exactly what the C19 k6 profile measures.
 
@@ -87,7 +87,7 @@ The wire carries one timestamp, `capturedAtMs`, from the device clock, deliberat
 
 ### Device disconnect
 
-The server side shipped at C6 as a signal, not a verdict: GET /devices exposes `lastReceivedAtMs` per device ([apps/server/src/reads.ts](../apps/server/src/reads.ts)), sessions survive WS reconnects by design, and rendering silence instead of stale numbers is the C11 dashboard's job. C15 owns the BLE side with the state machine documented in apps/ios/README at that commit (disconnected → connecting → connected → streaming → recovering). The simulator is a pure generator ([packages/vitals-sim](../packages/vitals-sim)); transport-level disconnect simulation arrives with the C14 simulator transport.
+The server side shipped at C6 as a signal, not a verdict: GET /devices exposes `lastReceivedAtMs` per device ([apps/server/src/reads.ts](../apps/server/src/reads.ts)), and sessions survive WS reconnects by design; C11 renders that silence rather than papering over it, breaking the chart line across a run of missing samples and shading it as a coverage gap ([apps/web/src/chart/geometry.ts](../apps/web/src/chart/geometry.ts)) while the dashboard's own socket state sits beside the data it explains. C15 owns the BLE side with the state machine documented in apps/ios/README at that commit (disconnected → connecting → connected → streaming → recovering). The simulator is a pure generator ([packages/vitals-sim](../packages/vitals-sim)); transport-level disconnect simulation arrives with the C14 simulator transport.
 
 ### Offline buffering and replay
 

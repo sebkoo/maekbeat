@@ -1,3 +1,5 @@
+import type { AlertEvent } from "@maekbeat/protocol";
+
 import {
   alertsPageSchema,
   deviceListSchema,
@@ -7,8 +9,16 @@ import {
   type DeviceList,
   type FramesPage,
   type Health,
+  type StoredFrame,
 } from "./contracts";
 import { createHttpClient, type FetchLike } from "./http";
+import {
+  openStream,
+  type ConnectionState,
+  type Scheduler,
+  type SocketFactory,
+  type StreamSubscription,
+} from "./stream";
 
 /*
  * Typed client for the apps/server route surface (apps/server/src/openapi.test.ts
@@ -31,17 +41,32 @@ export interface FramesQuery {
   limit?: number;
 }
 
+/** What a subscriber gets from the fan-out socket, already contract-checked. */
+export interface DeviceStreamHandlers {
+  onFrame: (frame: StoredFrame) => void;
+  onAlert: (alert: AlertEvent) => void;
+  onState: (state: ConnectionState) => void;
+  /** A re-open: the caller back-fills the missed window over REST. */
+  onReconnect: () => void;
+  onInvalidMessage?: () => void;
+}
+
 export interface MaekbeatApi {
   readonly baseUrl: string;
   health(signal?: AbortSignal): Promise<Health>;
   listDevices(signal?: AbortSignal): Promise<DeviceList>;
   readFrames(deviceId: string, query?: FramesQuery, signal?: AbortSignal): Promise<FramesPage>;
   readAlerts(deviceId: string, signal?: AbortSignal): Promise<AlertsPage>;
+  /** The streaming member the C10 seam was built for (C11). */
+  subscribe(deviceId: string, handlers: DeviceStreamHandlers): StreamSubscription;
 }
 
 export interface ApiClientOptions {
   baseUrl?: string;
   fetchImpl?: FetchLike;
+  /** Socket and timer seams, injected in tests exactly like fetchImpl. */
+  createSocket?: SocketFactory;
+  schedule?: Scheduler;
 }
 
 /** VITE_API_BASE_URL (.env.example) with a development fallback. */
@@ -50,9 +75,18 @@ export function resolveApiBaseUrl(configured?: string): string {
   return trimmed ? trimmed : DEFAULT_API_BASE_URL;
 }
 
-/** WebSocket URL of the ingest route; the socket opens at C11 (docs/ROADMAP.md). */
+function wsBase(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, "").replace(/^http/, "ws");
+}
+
+/** WebSocket URL of the ingest route — device to server, driven by the gateway. */
 export function ingestUrl(baseUrl: string): string {
-  return `${baseUrl.replace(/\/+$/, "").replace(/^http/, "ws")}/ingest`;
+  return `${wsBase(baseUrl)}/ingest`;
+}
+
+/** WebSocket URL of the dashboard fan-out for one device — server to dashboard. */
+export function streamUrl(baseUrl: string, deviceId: string): string {
+  return `${wsBase(baseUrl)}/devices/${encodeURIComponent(deviceId)}/stream`;
 }
 
 function queryString(query: FramesQuery): string {
@@ -81,5 +115,24 @@ export function createApiClient(options: ApiClientOptions = {}): MaekbeatApi {
       ),
     readAlerts: (deviceId, signal) =>
       http.getJson(`/devices/${encodeURIComponent(deviceId)}/alerts`, alertsPageSchema, signal),
+    subscribe: (deviceId, handlers) =>
+      openStream(
+        streamUrl(http.baseUrl, deviceId),
+        {
+          onMessage: (message) => {
+            // `ready` carries the server's ring capacity; the client's own
+            // window is what it can back-fill, so nothing to do with it here.
+            if (message.type === "frame") handlers.onFrame(message.frame);
+            else if (message.type === "alert") handlers.onAlert(message.alert);
+          },
+          onState: handlers.onState,
+          onReconnect: handlers.onReconnect,
+          ...(handlers.onInvalidMessage ? { onInvalidMessage: handlers.onInvalidMessage } : {}),
+        },
+        {
+          ...(options.createSocket ? { createSocket: options.createSocket } : {}),
+          ...(options.schedule ? { schedule: options.schedule } : {}),
+        },
+      ),
   };
 }

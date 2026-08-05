@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatDelta, formatInstant, formatNumber } from "./format";
+import { formatClock, formatDelta, formatInstant, formatNumber } from "./format";
 
 describe("formatInstant", () => {
   it("renders epoch milliseconds in UTC, independent of the viewer's timezone", () => {
@@ -13,6 +13,13 @@ describe("formatInstant", () => {
   it("renders a dash for a stamp Date cannot represent", () => {
     expect(formatInstant(9e15)).toBe("—");
     expect(formatInstant(Number.NaN)).toBe("—");
+  });
+});
+
+describe("formatClock", () => {
+  it("drops the date, which repeats across an axis", () => {
+    expect(formatClock(1_754_000_012_000)).toBe("22:13:32Z");
+    expect(formatClock(Number.NaN)).toBe("—");
   });
 });
 

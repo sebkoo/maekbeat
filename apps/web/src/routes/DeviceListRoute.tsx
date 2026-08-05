@@ -7,9 +7,8 @@ import { formatInstant } from "../format";
 
 /**
  * The device list: one REST read of `GET /devices` per mount. It is a snapshot
- * of the server's ring-buffer window, not a live view — the WebSocket stream
- * lands at C11 (docs/ROADMAP.md), and the page says so rather than implying
- * numbers are current.
+ * and says so; the fan-out socket is per device (C11), so the live view is the
+ * device page rather than this index.
  */
 export function DeviceListRoute() {
   const api = useApi();
@@ -20,7 +19,7 @@ export function DeviceListRoute() {
       <h1 className="mb-page__title">Devices</h1>
       <p className="mb-page__lead">
         Every device apps/server has ingested this process lifetime, read once when this page
-        loaded. Live streaming and the vitals chart land at C11.
+        loaded. Open a device for the live view.
       </p>
 
       {state.status === "loading" ? (

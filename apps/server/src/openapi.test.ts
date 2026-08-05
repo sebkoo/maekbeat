@@ -8,6 +8,7 @@ const EXPECTED_PATHS = [
   "/devices",
   "/devices/{deviceId}/alerts",
   "/devices/{deviceId}/frames",
+  "/devices/{deviceId}/stream",
   "/healthz",
   "/ingest",
 ];

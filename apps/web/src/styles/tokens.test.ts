@@ -225,12 +225,14 @@ describe("tokens are the only source of values", () => {
     }
   });
 
-  it("keeps the network inside src/api/http.ts", () => {
-    // The transport isolation the C11 swap depends on, asserted rather than
-    // trusted: no component or hook may open its own connection.
+  it("keeps the network inside the two transport modules", () => {
+    // Transport isolation, asserted rather than trusted: no component or hook
+    // may open its own connection. src/api/http.ts holds the fetch layer and
+    // src/api/stream.ts the fan-out socket (C11); nothing else may.
+    const TRANSPORT_MODULES = new Set(["api/http.ts", "api/stream.ts"]);
     const transport = /\bfetch\(|new WebSocket\(|XMLHttpRequest|navigator\.sendBeacon|EventSource/;
     for (const [path, code] of shipped) {
-      if (path === "api/http.ts") continue;
+      if (TRANSPORT_MODULES.has(path)) continue;
       expect(transport.test(code), `${path} reaches the network directly`).toBe(false);
     }
   });

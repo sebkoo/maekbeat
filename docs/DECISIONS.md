@@ -73,3 +73,9 @@ Decision: raised, ongoing, and resolved each carry a word, a mark glyph, and a b
 Alternatives: a red/amber/green triad; colour plus an icon font; patterned fills.  
 Trade-offs: three cues per state cost badge width and one extra token pair per state, where a hue triad would be smaller and instantly familiar — but red/amber/green is the exact palette deuteranopia and protanopia collapse, and a greyscale screenshot flattens it entirely.  
 Why now: the C12 timeline renders these same three states and its WCAG 2.2 AA pass grades them, so fixing the encoding at the scaffold commit keeps C12 a verification step rather than a redesign.
+
+**13. Min/max envelope decimation, and gaps before buckets**  
+Decision: the live chart thins its series by keeping each bucket's lowest and highest sample (apps/web/src/chart/geometry.ts), and splits the series at coverage gaps before any thinning happens.  
+Alternatives: stride sampling every n-th frame; largest-triangle-three-buckets; drawing every frame and letting the browser cope.  
+Trade-offs: an envelope emits up to two points per bucket instead of one and draws a band rather than a smooth line where the signal is noisy, and splitting first costs a second pass — in exchange no local extreme can be sampled away, where stride sampling drops whatever falls between its steps and would silently delete a one-sample SpO2 trough, and no bucket can span a hole and quietly reconnect the line across it.  
+Why now: C11 is the first commit that draws vitals at all, the ring holds more frames (1024) than the plot has pixels, and the desaturation trough is the exact signal this project exists to surface — pinning both rules with tests at the first chart keeps C12's timeline and C23's demo honest by construction.

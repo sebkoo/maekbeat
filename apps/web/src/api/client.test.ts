@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createApiClient, ingestUrl, resolveApiBaseUrl, DEFAULT_API_BASE_URL } from "./client";
+import {
+  createApiClient,
+  ingestUrl,
+  resolveApiBaseUrl,
+  streamUrl,
+  DEFAULT_API_BASE_URL,
+} from "./client";
 import { ApiError, type FetchLike } from "./http";
+import type { SocketHandlers } from "./stream";
 
 const BASE = "http://api.test";
 
@@ -273,6 +280,108 @@ describe("createApiClient — failure handling", () => {
     const api = createApiClient({ baseUrl: BASE, fetchImpl });
 
     await expect(api.listDevices()).resolves.toMatchObject({ devices: [] });
+  });
+});
+
+describe("subscribe — the streaming member (C11)", () => {
+  /** A socket the test drives, injected exactly like fetchImpl. */
+  function harness() {
+    let handlers: SocketHandlers | undefined;
+    let url = "";
+    const frames: unknown[] = [];
+    const alerts: unknown[] = [];
+    const states: string[] = [];
+    const invalid: number[] = [];
+    const closed = { count: 0 };
+
+    const api = createApiClient({
+      baseUrl: BASE,
+      createSocket: (socketUrl, socketHandlers) => {
+        url = socketUrl;
+        handlers = socketHandlers;
+        return {
+          close: () => {
+            closed.count += 1;
+          },
+        };
+      },
+      schedule: () => () => {},
+    });
+
+    const subscription = api.subscribe("dev-1", {
+      onFrame: (frame) => frames.push(frame),
+      onAlert: (alert) => alerts.push(alert),
+      onState: (state) => states.push(state),
+      onReconnect: () => {},
+      onInvalidMessage: () => invalid.push(1),
+    });
+
+    return {
+      url: () => url,
+      deliver: (message: unknown) => handlers?.onMessage(JSON.stringify(message)),
+      open: () => handlers?.onOpen(),
+      frames,
+      alerts,
+      states,
+      invalid,
+      closed,
+      subscription,
+    };
+  }
+
+  it("opens the device's fan-out route", () => {
+    expect(harness().url()).toBe(`${BASE.replace("http", "ws")}/devices/dev-1/stream`);
+    expect(streamUrl("https://maekbeat.example/", "a b")).toBe(
+      "wss://maekbeat.example/devices/a%20b/stream",
+    );
+  });
+
+  it("routes frames and alerts to their handlers and ignores the greeting", () => {
+    const h = harness();
+    h.open();
+    h.deliver({ type: "ready", deviceId: "dev-1", serverTimeMs: 1, ringCapacity: 1024 });
+    h.deliver({ type: "frame", frame: FRAME });
+    h.deliver({ type: "alert", alert: ALERT });
+
+    expect(h.frames).toEqual([FRAME]);
+    expect(h.alerts).toEqual([ALERT]);
+    expect(h.states).toEqual(["connecting", "live"]);
+  });
+
+  it("counts a message the contract rejects instead of handing it on", () => {
+    const h = harness();
+    h.open();
+    h.deliver({ type: "frame", frame: { ...FRAME, spo2Pct: 140 } });
+
+    expect(h.frames).toEqual([]);
+    expect(h.invalid).toHaveLength(1);
+  });
+
+  it("closes the socket when the subscriber closes", () => {
+    const h = harness();
+    h.open();
+    h.subscription.close();
+    expect(h.closed.count).toBe(1);
+  });
+
+  it("works without the optional invalid-message handler", () => {
+    let handlers: SocketHandlers | undefined;
+    const api = createApiClient({
+      baseUrl: BASE,
+      createSocket: (_url, socketHandlers) => {
+        handlers = socketHandlers;
+        return { close: () => {} };
+      },
+      schedule: () => () => {},
+    });
+    api.subscribe("dev-1", {
+      onFrame: () => {},
+      onAlert: () => {},
+      onState: () => {},
+      onReconnect: () => {},
+    });
+    handlers?.onOpen();
+    expect(() => handlers?.onMessage("{not json")).not.toThrow();
   });
 });
 

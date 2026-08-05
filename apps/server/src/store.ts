@@ -1,4 +1,9 @@
-import type { VitalsFrame } from "@maekbeat/protocol";
+import type { StoredVitalsFrame, VitalsFrame } from "@maekbeat/protocol";
+
+// Re-exported so the many `from "./store"` imports keep working: since C11 the
+// stored shape is on the wire (dashboard fan-out) and therefore belongs to the
+// shared contract, defined once in packages/protocol/src/stream.ts.
+export type { StoredVitalsFrame };
 
 /**
  * Reorder tolerance in frames. A seq within [highSeq - WINDOW, highSeq] is a
@@ -8,14 +13,6 @@ import type { VitalsFrame } from "@maekbeat/protocol";
  * documented in packages/protocol/README.md.
  */
 export const SEQ_REORDER_WINDOW = 64;
-
-/** A frame at rest: the wire frame plus the two server-side ingest stamps. */
-export interface StoredVitalsFrame extends VitalsFrame {
-  /** Server clock at ingest — the drift signal (docs/ARCHITECTURE.md). */
-  receivedAtMs: number;
-  /** Server-side session counter; bumps when seq regresses past the window. */
-  sessionEpoch: number;
-}
 
 export type IngestResult =
   | { kind: "accepted"; sessionEpoch: number; newSession: boolean }

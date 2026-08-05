@@ -1,4 +1,4 @@
-import { alertEventSchema, vitalsFrameSchema } from "@maekbeat/protocol";
+import { alertEventSchema, storedVitalsFrameSchema } from "@maekbeat/protocol";
 import { z } from "zod";
 
 /*
@@ -16,11 +16,12 @@ import { z } from "zod";
  *     a server that adds a counter does not blank a caregiver's screen.
  */
 
-/** A frame as apps/server serves it: the wire frame plus the two server-side stamps. */
-export const storedFrameSchema = vitalsFrameSchema.extend({
-  receivedAtMs: z.int(),
-  sessionEpoch: z.int().positive(),
-});
+/**
+ * A frame as apps/server serves it, over REST and over the C11 fan-out socket
+ * alike. Defined once in @maekbeat/protocol since C11, when the shape reached
+ * the wire in both directions.
+ */
+export const storedFrameSchema = storedVitalsFrameSchema;
 export type StoredFrame = z.infer<typeof storedFrameSchema>;
 
 export const healthSchema = z.object({

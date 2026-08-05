@@ -4,6 +4,7 @@ import type { RawData } from "ws";
 
 import type { AlertEngine } from "./alerts";
 import type { VitalsStore } from "./store";
+import type { DeviceBroadcaster } from "./stream";
 
 /**
  * Transport bound, not a throughput claim: one JSON vitals frame per WS
@@ -23,6 +24,8 @@ export interface IngestPluginOptions {
   store: VitalsStore;
   engine: AlertEngine;
   counters: IngestCounters;
+  /** Fan-out to subscribed dashboards (C11); omitted, ingest runs unchanged. */
+  broadcaster?: DeviceBroadcaster;
 }
 
 function rawDataToString(data: RawData): string {
@@ -38,7 +41,7 @@ function rawDataToString(data: RawData): string {
  * socket — one bad frame must not sever a stream carrying good ones.
  */
 export const ingestPlugin: FastifyPluginAsync<IngestPluginOptions> = async (app, opts) => {
-  const { store, engine, counters } = opts;
+  const { store, engine, counters, broadcaster } = opts;
 
   app.route({
     method: "GET",
@@ -116,16 +119,20 @@ export const ingestPlugin: FastifyPluginAsync<IngestPluginOptions> = async (app,
 
         // Deduped frames never reach the engine — a retransmit cannot
         // re-count toward a window that already saw the value.
-        const transitions = engine.process({
-          ...frame,
-          receivedAtMs,
-          sessionEpoch: result.sessionEpoch,
-        });
+        const stored = { ...frame, receivedAtMs, sessionEpoch: result.sessionEpoch };
+        const transitions = engine.process(stored);
         for (const transition of transitions) {
           request.log.info(
             { alertId: transition.alertId, state: transition.state, metric: transition.metric },
             "alert transition",
           );
+        }
+
+        // Fan-out after the engine, so a dashboard never sees a frame before
+        // the alert that frame raised (C11; docs/ARCHITECTURE.md stage 7).
+        broadcaster?.publishFrame(stored);
+        for (const transition of transitions) {
+          broadcaster?.publishAlert(transition);
         }
 
         socket.send(

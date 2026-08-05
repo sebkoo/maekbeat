@@ -20,6 +20,12 @@ export function formatInstant(epochMs: number): string {
   return `${new Date(epochMs).toISOString().slice(0, 19).replace("T", " ")}Z`;
 }
 
+/** Just the clock part, `HH:MM:SSZ` — for axis ends, where the date repeats. */
+export function formatClock(epochMs: number): string {
+  const instant = formatInstant(epochMs);
+  return instant === "—" ? instant : instant.slice(11);
+}
+
 /** Fixed-width decimal; NaN and Infinity render as an em dash, never as "NaN". */
 export function formatNumber(value: number, digits = 0): string {
   return Number.isFinite(value) ? value.toFixed(digits) : "—";

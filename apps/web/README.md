@@ -1,6 +1,6 @@
 # @maekbeat/web
 
-The caregiver dashboard, C10 of [docs/ROADMAP.md](../../docs/ROADMAP.md): a React 19 + Vite + TypeScript scaffold, the design tokens the rest of Phase 4 draws from, and a typed client for the [apps/server](../server) read surface. Each route reads once over REST when it mounts; the live WebSocket stream and the vitals chart land at C11.
+The caregiver dashboard, C10–C11 of [docs/ROADMAP.md](../../docs/ROADMAP.md): a React 19 + Vite + TypeScript app with the design tokens the rest of Phase 4 draws from, a typed client for the [apps/server](../server) surface, and — since C11 — live vitals over the fan-out WebSocket. The device list is still one REST read per mount; the device page reads once and then streams.
 
 ## Run it
 
@@ -53,27 +53,55 @@ Every read renders from one union in [src/data/useAsync.ts](src/data/useAsync.ts
 
 A fifth path is the one nobody designs: a component that throws. [src/components/ErrorBoundary.tsx](src/components/ErrorBoundary.tsx) catches it inside the shell, so the failure gets an error panel and the not-a-medical-device line stays on screen — a blank page reads as calm, which is the one thing this surface must never do by accident.
 
-Device-level staleness — a reachable server whose device has gone quiet, `lastReceivedAtMs` on `GET /devices` — is a different signal and is rendered at C11, per [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md). The chart slot on the device page stays a labelled placeholder until then rather than drawing a trace that is not live.
+Since C11 the connection has its own four states on the device page, from the transport rather than from a guess: `connecting`, `live`, `reconnecting`, and `disconnected` — the last after three consecutive failed attempts, while retries continue at the capped interval. [src/components/ConnectionBadge.tsx](src/components/ConnectionBadge.tsx) renders them in the same three-cue discipline as the alert badge, so C10's disconnected state is now driven by a real socket rather than by an unreachable REST read alone.
+
+## Live vitals (C11)
+
+The device page opens `GET /devices/:deviceId/stream` on [apps/server](../server) through [src/api/stream.ts](src/api/stream.ts), the second and last module in this package that touches the network. Every message is parsed with `streamMessageSchema` from [@maekbeat/protocol](../../packages/protocol); one that fails is dropped, counted, and reported on the page — never rendered.
+
+A drop is retried with capped exponential backoff (500 ms doubling to a 15 s ceiling, `backoffFor`). Every re-open triggers a REST back-fill rather than a silent resume: [src/data/useLiveDevice.ts](src/data/useLiveDevice.ts) asks for frames captured at or after the newest frame it already holds, capped at the server's 1000-frame read limit, and merges them by `(sessionEpoch, seq)`. **The back-filled window is therefore at most the 1000 most recent frames the server still holds** — its ring keeps `RING_CAPACITY` (1024 by default), anything evicted while the dashboard was away is gone from every source, and that span renders as a gap, which is the honest rendering of data nobody has.
+
+### Gaps are gaps
+
+A monitoring chart that draws a line through a 40-second outage claims coverage the system did not have. [src/chart/geometry.ts](src/chart/geometry.ts) splits the series wherever the interval between samples exceeds three times the window's median interval (floor 2.5 s, so a jittery stream is not all holes), draws one path per run of real coverage, and shades the hole between them. `prepareSeries` finds the gaps **before** decimating and thins each run separately, so shrinking the point count can never bridge a hole.
+
+### Decimation must not eat the event
+
+The ring holds up to 1024 frames and the plot is a few hundred pixels wide, so points must be dropped. They are dropped by min/max envelope — each bucket keeps its lowest and highest sample, in the order they occurred — never by stride. Stride sampling drops whatever falls between its steps, and the single trough of an SpO2 desaturation is exactly the sample this project exists to show; the tests assert that the trough reaches the drawn path and that a stride sampler over the same series loses it, so swapping the implementation fails the build.
+
+### Which clock the x axis uses
+
+Time on the chart is `capturedAtMs`, the device clock, per [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) — drift shifts charts, never alerts. The consequence is stated rather than hidden: a device whose clock drifts slides its whole trace against the alert marks, which carry server receive time. The page shows that drift as `receivedAtMs − capturedAtMs` for the newest frame, and each alert mark is anchored to the frame nearest its raise, so a mark points at a real sample instead of at a timestamp converted between two clocks.
+
+An alert raised outside the frame window is not marked at all. Alerts are kept per process lifetime (100 per device) while frames are a bounded ring, so anchoring an older one would pile it onto the window's first frame and claim an event at a time when nothing happened; the chart counts those instead and says how many it left unmarked.
+
+Only the newest session is drawn. `sessionEpoch` bumps when a device reboots or its `seq` regresses past the reorder window ([docs/DECISIONS.md](../../docs/DECISIONS.md) #11), and a reboot may reset the device clock — so joining two sessions on one device-clock axis would invent a shape neither session had. The chart says which session it is showing and how many frames it left out.
+
+The two metrics render as separate small multiples sharing one time axis — no dual y-axis, which would invite comparing shapes that are not comparable. Alert marks reuse the palette of [docs/DECISIONS.md](../../docs/DECISIONS.md) #12, with the badge's border style mirrored as a stroke dash pattern so the three states stay apart in greyscale. Nothing in the chart animates: an eased line would put the newest sample on screen later than it arrived.
 
 ## API client
 
-[src/api/client.ts](src/api/client.ts) types the five-route surface pinned by [apps/server/src/openapi.test.ts](../server/src/openapi.test.ts): `/healthz`, `/devices`, `/devices/:deviceId/frames`, and `/devices/:deviceId/alerts` over HTTP, plus the WebSocket `/ingest` URL, which `ingestUrl()` derives and C11 opens.
+[src/api/client.ts](src/api/client.ts) types the six-route surface pinned by [apps/server/src/openapi.test.ts](../server/src/openapi.test.ts): `/healthz`, `/devices`, `/devices/:deviceId/frames`, and `/devices/:deviceId/alerts` over HTTP; `/devices/:deviceId/stream`, the fan-out socket `subscribe()` opens; and `/ingest`, whose URL `ingestUrl()` derives for the C14 gateway — the device-to-server leg this app never sends on.
 
-The fetch call itself is isolated in [src/api/http.ts](src/api/http.ts) and injected as `fetchImpl`, so tests never patch globals — and a source scan in [src/styles/tokens.test.ts](src/styles/tokens.test.ts) fails the build if any other file opens a connection. Components reach data only through the context in [src/data/api-context.tsx](src/data/api-context.tsx), so C11 adds a streaming member to `MaekbeatApi` and a subscription hook beside `useAsync` without any component constructing a transport; the chart itself is new markup, so the device page does change.
+The fetch call is isolated in [src/api/http.ts](src/api/http.ts) and the socket in [src/api/stream.ts](src/api/stream.ts), both injected (`fetchImpl`, `createSocket`, `schedule`), so tests drive a fake socket and a fake clock and never patch globals — and a source scan in [src/styles/tokens.test.ts](src/styles/tokens.test.ts) fails the build if any other file opens a connection. Components reach data only through the context in [src/data/api-context.tsx](src/data/api-context.tsx): C11 added the `subscribe` member there, exactly as the C10 seam was built for, and no component constructs a transport.
 
 Failures are typed by cause — `network`, `http`, `contract` — which is what lets the UI tell "the server is down" apart from "the server said no" ([src/components/StatusPanel.tsx](src/components/StatusPanel.tsx)).
 
 ## Test map
 
-| File                                                     | Pins                                                                                                                               |
-| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| [src/App.test.tsx](src/App.test.tsx)                     | shell and disclaimer, routing, the four read states, retry, the error boundary, and the class contract in both directions          |
-| [src/api/client.test.ts](src/api/client.test.ts)         | four routes over a mocked fetch, URL building, and the network/http/contract failure split                                         |
-| [src/styles/tokens.test.ts](src/styles/tokens.test.ts)   | token families, one accent, dark parity, contrast ratios, no literals, no dead tokens, and the network kept inside src/api/http.ts |
-| [src/data/useAsync.test.tsx](src/data/useAsync.test.tsx) | loading → ready → error, reload, abort on unmount, and a superseded read never repainting the current one                          |
-| [src/format.test.ts](src/format.test.ts)                 | UTC instants, fixed-decimal values, signed clock delta                                                                             |
+| File                                                                       | Pins                                                                                                                                                                           |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [src/App.test.tsx](src/App.test.tsx)                                       | shell and disclaimer, routing, the four read states, retry, the error boundary, live append, connection states, no socket left open, and the class contract in both directions |
+| [src/api/client.test.ts](src/api/client.test.ts)                           | four REST routes over a mocked fetch, URL building, the network/http/contract failure split, and `subscribe` routing frames and alerts                                         |
+| [src/api/stream.test.ts](src/api/stream.test.ts)                           | contract-checked messages, capped backoff, reconnect telling the caller to back-fill, disconnected after repeated failure, close cancelling a pending retry                    |
+| [src/chart/geometry.test.ts](src/chart/geometry.test.ts)                   | gap threshold from the sample rate, no segment spanning a hole, and the desaturation trough that stride sampling drops                                                         |
+| [src/components/VitalsChart.test.tsx](src/components/VitalsChart.test.tsx) | a broken path across a 40 s outage, gaps surviving decimation, alert marks by state, empty window                                                                              |
+| [src/data/useLiveDevice.test.tsx](src/data/useLiveDevice.test.tsx)         | REST seed then live append, merge by (sessionEpoch, seq), bounded window, back-fill on reconnect, socket closed on unmount                                                     |
+| [src/styles/tokens.test.ts](src/styles/tokens.test.ts)                     | token families, one accent, dark parity, contrast ratios, no literals, no dead tokens, and the network kept inside the two transport modules                                   |
+| [src/data/useAsync.test.tsx](src/data/useAsync.test.tsx)                   | loading → ready → error, reload, abort on unmount, and a superseded read never repainting the current one                                                                      |
+| [src/format.test.ts](src/format.test.ts)                                   | UTC instants, fixed-decimal values, signed clock delta                                                                                                                         |
 
-Coverage runs with `pnpm --filter @maekbeat/web test:coverage` ([vitest.config.ts](vitest.config.ts), v8 provider, all of src/ minus tests). The browser entry [src/main.tsx](src/main.tsx) stays in the denominator untested, the apps/server `main.ts` precedent: excluding a file to make the number look better is a G3 event, not a convenience. Thresholds sit just under the C10 measured floor (94.81% statements / 93.87% branches / 97.72% functions / 95.04% lines) and are a ratchet — they move only up ([CLAUDE.md](../../CLAUDE.md)).
+Coverage runs with `pnpm --filter @maekbeat/web test:coverage` ([vitest.config.ts](vitest.config.ts), v8 provider, all of src/ minus tests). The browser entry [src/main.tsx](src/main.tsx) stays in the denominator untested, the apps/server `main.ts` precedent: excluding a file to make the number look better is a G3 event, not a convenience. Thresholds were raised at C11 against a measured 96.95% statements / 92.10% branches / 98.19% functions / 98.46% lines. Branches is the one that did not move — it measured 93.87% at C10 and 92.10% here, because the live path adds branchier code than it adds covered branches, so the threshold stays at 91 rather than following a measurement downwards ([CLAUDE.md](../../CLAUDE.md)).
 
 ## Configuration
 
