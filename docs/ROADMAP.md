@@ -58,27 +58,31 @@ Defensibility rule for C20 and C21: every claim cites a repo path or is marked "
 - C23 — release: v0.1.0. Refreshed demo GIF, a quickstart that runs in 30 seconds or less, changelog, release badge (badge #7 — final; the lifetime badge cap is 7), issue templates + labels (good first issue, help wanted, architecture discussion), and seeded good-first-issues.
 - C23 also defines the v0.2 product loop: instrument alert usefulness (acknowledged vs dismissed), false-alarm rate, and retention signals. For a health app the question is not "does it work" but "does it keep being used".
 
-## JD traceability
+## Capability coverage
 
-| JD line                                              | Artifact                                                              | Commit              |
-| ---------------------------------------------------- | --------------------------------------------------------------------- | ------------------- |
-| Full-stack connected platforms                       | device→cloud→web pipeline across apps/ and packages/                  | C1–C19              |
-| React responsive UX                                  | apps/web dashboard, WCAG 2.2 AA pass                                  | C10–C13             |
-| Swift iOS                                            | apps/ios SwiftUI app                                                  | C14–C17             |
-| Backend REST APIs                                    | apps/server REST routes + OpenAPI                                     | C5–C6               |
-| AWS EC2/S3/Lambda/ECR                                | infra/ CDK stacks, synth-in-CI                                        | C19                 |
-| Device→phone→web pipeline                            | server→web leg in docs/demo/preview.gif (C12); device→phone leg — C15 | C12, C15            |
-| Scale target + load test                             | k6 profile with measured numbers                                      | C19                 |
-| Testing, validation, documentation                   | golden tests, server suite, coverage gate, web + iOS tests            | C3, C8–C9, C13, C17 |
-| Architecture, performance, security                  | ARCHITECTURE.md budgets, k6 measurements, STRIDE model                | C4, C19, C22        |
-| Written communication                                | docs/adr/, PR template, commit discipline                             | C0                  |
-| DevOps (observability, Docker, CI/CD)                | Dockerfile, compose, OpenTelemetry, CI pipelines                      | C0, C18             |
-| APIs & connected-device ecosystems                   | BLE GATT doc + BLE lifecycle state machine                            | C15                 |
-| FDA-regulated literacy                               | intended-use + IEC 62304 rationale + SOUP inventory                   | C20                 |
-| Cybersecurity SOPs + post-market surveillance mirror | SECURITY.md CVD, Dependabot, SBOM at release, patch cadence           | C0, C22             |
-| BLE, sensors, IoT                                    | vitals-sim transport + CoreBluetooth central                          | C2, C14–C15         |
-| Real-time pipelines                                  | WebSocket ingest, ring buffer, alert engine                           | C6–C7               |
-| Product mindset                                      | v0.2 loop definition + post-release track                             | C23                 |
+What a connected-health platform has to do to exist at all, and where each
+capability is demonstrated here. The mapping is the point: every row names an
+artifact in this repository or the commit that will produce it.
+
+| Capability                                    | Artifact                                                              | Commit              |
+| --------------------------------------------- | --------------------------------------------------------------------- | ------------------- |
+| Device-to-cloud-to-client platform            | device→cloud→web pipeline across apps/ and packages/                  | C1–C19              |
+| Responsive web client                         | apps/web dashboard, WCAG 2.2 AA pass                                  | C10–C13             |
+| Native mobile client                          | apps/ios SwiftUI app                                                  | C14–C17             |
+| Backend services and API contract             | apps/server REST routes + OpenAPI                                     | C5–C6               |
+| Cloud deployment as code                      | infra/ CDK stacks, synth-in-CI                                        | C19                 |
+| Device→phone→web pipeline                     | server→web leg in docs/demo/preview.gif (C12); device→phone leg — C15 | C12, C15            |
+| Scale target and load evidence                | k6 profile with measured numbers                                      | C19                 |
+| Testing and validation discipline             | golden tests, server suite, coverage gate, web + iOS tests            | C3, C8–C9, C13, C17 |
+| Architecture, performance, security           | ARCHITECTURE.md budgets, k6 measurements, STRIDE model                | C4, C19, C22        |
+| Written communication and decision records    | docs/adr/, PR template, commit discipline                             | C0                  |
+| Observability and delivery pipeline           | Dockerfile, compose, OpenTelemetry, CI pipelines                      | C0, C18             |
+| Connected-device integration                  | BLE GATT doc + BLE lifecycle state machine                            | C15                 |
+| Regulated-software literacy                   | intended-use + IEC 62304 rationale + SOUP inventory                   | C20                 |
+| Security posture and post-market surveillance | SECURITY.md CVD, Dependabot, SBOM at release, patch cadence           | C0, C22             |
+| Sensors and BLE transport                     | vitals-sim transport + CoreBluetooth central                          | C2, C14–C15         |
+| Real-time pipeline                            | WebSocket ingest, ring buffer, alert engine                           | C6–C7               |
+| Product measurement loop                      | v0.2 loop definition + post-release track                             | C23                 |
 
 ## Post-release track (no commit numbers)
 

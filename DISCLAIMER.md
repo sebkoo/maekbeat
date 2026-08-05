@@ -31,4 +31,4 @@ and no clinical records anywhere in this codebase.
 
 This is an independent open-source project by its author, Ben Koo. It is
 not affiliated with, endorsed by, or produced for any company or
-institution.
+institution, and it names none.

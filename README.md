@@ -109,7 +109,9 @@ Updated in the same commit as every scope change. A commit cannot link itself, s
 
 ## Why I'm building this
 
-SUDEP kills roughly 1 in 1,000 people with epilepsy per year, mostly unwitnessed during sleep ([CDC](https://www.cdc.gov/epilepsy/sudep/index.html), [Epilepsy Foundation](https://www.epilepsy.com/complications-risks/early-death-sudep)). Companies like Neurava build wearables against exactly this risk. I'm an iOS engineer building that entire class of system — device to dashboard — in public, properly; [docs/ROADMAP.md](docs/ROADMAP.md) is the path there.
+SUDEP kills roughly 1 in 1,000 people with epilepsy per year, mostly unwitnessed during sleep ([CDC](https://www.cdc.gov/epilepsy/sudep/index.html), [Epilepsy Foundation](https://www.epilepsy.com/complications-risks/early-death-sudep)). Seizure-alert wearables are a real regulated product category, not a thought experiment: the Empatica Embrace was cleared by the FDA in 2018, described at clearance as the first smartwatch cleared in neurology. C20 carries that citation alongside the rest of the regulatory reading.
+
+I'm an iOS engineer building that entire class of system — device to dashboard — in public, properly. Maekbeat detects nothing and is cleared by nobody ([DISCLAIMER.md](DISCLAIMER.md)); what it demonstrates is the engineering a system in that category needs. [docs/ROADMAP.md](docs/ROADMAP.md) is the path there.
 
 ## How this is built
 

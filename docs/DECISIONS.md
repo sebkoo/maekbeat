@@ -46,7 +46,7 @@ Why now: The packages/protocol schemas must stay in lockstep with server and web
 
 **8. Swift native (see ADR-0001)**  
 Decision: Native Swift + SwiftUI for the iOS app in apps/ios.  
-Alternatives: React Native (the JD lists both), Flutter.  
+Alternatives: React Native, Flutter.  
 Trade-offs: No UI code shared with apps/web, and a second language in the repo.  
 Why now: BLE background work is platform-specific — CoreBluetooth state restoration and background modes — and native is my strongest lane.
 
