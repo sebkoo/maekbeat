@@ -4,7 +4,7 @@ Maekbeat ships as a sequence of atomic, one-feature commits, C0 through C23. Thi
 
 ## Ordering note
 
-Commits are ordered by dependency, not by calendar, and independent commits may interleave. In particular, C3 (golden tests) and C4 (ARCHITECTURE.md) must never block the runnable-pipeline path to C5. The 48–72 hour pace target for reaching C5 binds the runnable path, not the documentation commits.
+Commits are ordered by dependency, not by calendar, and independent commits may interleave. In particular, C3 (golden tests) and C4 (ARCHITECTURE.md) must never block the runnable-server path to C5; the pipeline itself becomes runnable at C6. The 48–72 hour pace target for reaching C5 binds that runnable path, not the documentation commits.
 
 ## Phase 1 — Foundations
 
@@ -15,11 +15,11 @@ Commits are ordered by dependency, not by calendar, and independent commits may 
 - C1 — feat(protocol): shared types + zod schemas in packages/protocol — shipped [63be391](https://github.com/sebkoo/maekbeat/commit/63be391): strict vitals frame schema with transport-validity bounds, the `frameKey` dedupe identity, and the workspace test + typecheck CI job pulled forward from the C5 plan.
 - C2 — feat(vitals-sim): synthetic HR/SpO2/respiration/motion generator with rest, motion, and anomaly scenarios — shipped [01b9007](https://github.com/sebkoo/maekbeat/commit/01b9007): Irwin–Hall noise for cross-engine byte determinism, HR read noise coupled to motion amplitude, and an enforced spo2LagTicks ≥ 1 desaturation-lag invariant.
 - C3 — test(vitals-sim): golden-file scenario tests — shipped [6ba9c91](https://github.com/sebkoo/maekbeat/commit/6ba9c91): NDJSON fixtures regenerable byte-for-byte from their own headers, four gates per fixture, and golden:update running the full suite with its pass-by-construction byte gates documented.
-- C4 — docs: ARCHITECTURE.md with mermaid diagrams and latency budgets (frame→dashboard under 2 s, alert fan-out under 5 s — all labeled targets until C19 measures them). Scaling chain: BLE device (sim) → iOS gateway → WebSocket ingestion → event queue (in-process ring buffer in dev; SQS in the target architecture) → stream processor (alert engine) → storage (S3 raw archive; time-series considerations) → dashboard fan-out + caregiver notification. Each stage must answer for five failure modes: device disconnect, duplicate packets, delayed or out-of-order packets, clock drift, and offline buffering with replay. — shipped: failure-mode ownership table code-backed to packages/protocol, the clock-drift policy fixed (receivedAtMs − capturedAtMs delta, alert windows on server receive time), and per-budget C19 measurement methods; sha chip backfills at C5.
+- C4 — docs: ARCHITECTURE.md with mermaid diagrams and latency budgets (frame→dashboard under 2 s, alert fan-out under 5 s — all labeled targets until C19 measures them). Scaling chain: BLE device (sim) → iOS gateway → WebSocket ingestion → event queue (in-process ring buffer in dev; SQS in the target architecture) → stream processor (alert engine) → storage (S3 raw archive; time-series considerations) → dashboard fan-out + caregiver notification. Each stage must answer for five failure modes: device disconnect, duplicate packets, delayed or out-of-order packets, clock drift, and offline buffering with replay. — shipped [aa568a5](https://github.com/sebkoo/maekbeat/commit/aa568a5): failure-mode ownership table code-backed to packages/protocol, the clock-drift policy fixed (receivedAtMs − capturedAtMs delta, alert windows on server receive time), and per-budget C19 measurement methods.
 
-## Phase 3 — Server (planned)
+## Phase 3 — Server (in progress)
 
-- C5 — feat(server): Fastify skeleton, /healthz, OpenAPI, CI wiring.
+- C5 — feat(server): Fastify skeleton, /healthz, OpenAPI, CI wiring — shipped: typed env config (zod defaults + .env.example), pino logging, central error handler masking 5xx outside development, graceful SIGTERM/SIGINT shutdown, and an OpenAPI document currently listing exactly /healthz; the existing pnpm -r CI job picks the package up unchanged; sha chip backfills at C6.
 - C6 — feat(server): WebSocket ingest + ring-buffer store + REST reads. Decides the dedupe scope for device reboots (`seq` reset to 0): session/boot id vs treating `seq` regression as a new session — caveat recorded in packages/protocol/README.md.
 - C7 — feat(server): sliding-window alert engine.
 - C8 — test(server): unit + integration suite.

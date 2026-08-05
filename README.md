@@ -52,12 +52,12 @@ Engineers: start at [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · the why: [do
 git clone https://github.com/sebkoo/maekbeat.git && cd maekbeat && ./scripts/bootstrap.sh
 ```
 
-[scripts/bootstrap.sh](scripts/bootstrap.sh) verifies the toolchain and activates the .githooks. Runnable pipeline lands at C5 — follow the board.
+[scripts/bootstrap.sh](scripts/bootstrap.sh) verifies the toolchain and activates the .githooks. The server skeleton ([apps/server](apps/server)) runs today; the runnable pipeline lands at C6 — follow the board.
 
 ## Repository tour
 
 ```text
-apps/        ios · server · web — planned, C5–C17
+apps/        server (Fastify /healthz + OpenAPI — C5) · web, ios — planned, C10–C17
 packages/    protocol (shared vitals contract: types + zod schemas)
              vitals-sim (deterministic synthetic vitals: rest, motion, anomaly)
 infra/       AWS CDK stacks — planned, C19
@@ -69,28 +69,28 @@ scripts/     bootstrap + hygiene checks
 
 ## Status
 
-| Phase                    | Ships                                                                                                                                         | Status | Commits                                                                                                                                                                                                      |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1 — Foundations          | toolchain, guardrails, docs harness — foundation commit — application code intentionally starts at C1; see [docs/ROADMAP.md](docs/ROADMAP.md) | ✅     | [C0](https://github.com/sebkoo/maekbeat/commits/main)                                                                                                                                                        |
-| 2 — Contract & simulator | zod schemas, vitals-sim, golden tests, architecture doc                                                                                       | ✅     | [C1 protocol](https://github.com/sebkoo/maekbeat/commit/63be391) · [C2 vitals-sim](https://github.com/sebkoo/maekbeat/commit/01b9007) · [C3 goldens](https://github.com/sebkoo/maekbeat/commit/6ba9c91) · C4 |
-| 3 — Server               | Fastify, WS ingest, alert engine, tests, coverage gate                                                                                        | ⬜     | C5–C9                                                                                                                                                                                                        |
-| 4 — Web                  | React scaffold, live chart, timeline + ack, tests                                                                                             | ⬜     | C10–C13                                                                                                                                                                                                      |
-| 5 — iOS                  | SwiftUI, CoreBluetooth, notifications, XCTest                                                                                                 | ⬜     | C14–C17                                                                                                                                                                                                      |
-| 6 — Infra & operations   | Docker + compose, OTel, CDK synth-in-CI, k6                                                                                                   | ⬜     | C18–C19                                                                                                                                                                                                      |
-| 7 — Depth                | intended use, risk register, threat model, SBOM                                                                                               | ⬜     | C20–C22                                                                                                                                                                                                      |
-| 8 — Release              | v0.1.0                                                                                                                                        | ⬜     | C23                                                                                                                                                                                                          |
+| Phase                    | Ships                                                                                                                                         | Status | Commits                                                                                                                                                                                                                                                                        |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1 — Foundations          | toolchain, guardrails, docs harness — foundation commit — application code intentionally starts at C1; see [docs/ROADMAP.md](docs/ROADMAP.md) | ✅     | [C0](https://github.com/sebkoo/maekbeat/commits/main)                                                                                                                                                                                                                          |
+| 2 — Contract & simulator | zod schemas, vitals-sim, golden tests, architecture doc                                                                                       | ✅     | [C1 protocol](https://github.com/sebkoo/maekbeat/commit/63be391) · [C2 vitals-sim](https://github.com/sebkoo/maekbeat/commit/01b9007) · [C3 goldens](https://github.com/sebkoo/maekbeat/commit/6ba9c91) · [C4 architecture](https://github.com/sebkoo/maekbeat/commit/aa568a5) |
+| 3 — Server               | Fastify, WS ingest, alert engine, tests, coverage gate                                                                                        | 🔄     | C5 skeleton · C6–C9                                                                                                                                                                                                                                                            |
+| 4 — Web                  | React scaffold, live chart, timeline + ack, tests                                                                                             | ⬜     | C10–C13                                                                                                                                                                                                                                                                        |
+| 5 — iOS                  | SwiftUI, CoreBluetooth, notifications, XCTest                                                                                                 | ⬜     | C14–C17                                                                                                                                                                                                                                                                        |
+| 6 — Infra & operations   | Docker + compose, OTel, CDK synth-in-CI, k6                                                                                                   | ⬜     | C18–C19                                                                                                                                                                                                                                                                        |
+| 7 — Depth                | intended use, risk register, threat model, SBOM                                                                                               | ⬜     | C20–C22                                                                                                                                                                                                                                                                        |
+| 8 — Release              | v0.1.0                                                                                                                                        | ⬜     | C23                                                                                                                                                                                                                                                                            |
 
 Updated in the same commit as every scope change. A commit cannot link itself, so each shipped commit's SHA chip is backfilled by the next commit that touches the board — the one-commit lag is by design.
 
 ## Stack
 
-| Layer   | Tools                                                               | Status                                                           |
-| ------- | ------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| iOS     | Swift 5.10+, SwiftUI, CoreBluetooth                                 | planned, C14–C17                                                 |
-| Web     | React 19, Vite, TypeScript                                          | planned, C10–C13                                                 |
-| Server  | Node 22, TypeScript, Fastify, WebSocket                             | planned, C5–C9                                                   |
-| Infra   | AWS CDK: S3, Lambda, ECR, ECS/EC2; Docker                           | planned, C18–C19                                                 |
-| Quality | prettier + markdownlint via .githooks; CI hygiene + workspace tests | live today, [.github/workflows/ci.yml](.github/workflows/ci.yml) |
+| Layer   | Tools                                                               | Status                                                                      |
+| ------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| iOS     | Swift 5.10+, SwiftUI, CoreBluetooth                                 | planned, C14–C17                                                            |
+| Web     | React 19, Vite, TypeScript                                          | planned, C10–C13                                                            |
+| Server  | Node 22, TypeScript, Fastify, WebSocket                             | skeleton live ([apps/server](apps/server), C5) · WS + alerts planned, C6–C9 |
+| Infra   | AWS CDK: S3, Lambda, ECR, ECS/EC2; Docker                           | planned, C18–C19                                                            |
+| Quality | prettier + markdownlint via .githooks; CI hygiene + workspace tests | live today, [.github/workflows/ci.yml](.github/workflows/ci.yml)            |
 
 ## Why I'm building this
 

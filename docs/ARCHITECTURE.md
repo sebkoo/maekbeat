@@ -4,7 +4,7 @@ Maekbeat's scaling chain, stage by stage, with the failure modes each stage must
 
 ## What exists today
 
-Two packages are real: [packages/protocol](../packages/protocol) — the wire contract, a strict zod `vitalsFrameSchema` with transport-validity bounds and the `frameKey` identity — and [packages/vitals-sim](../packages/vitals-sim), a deterministic synthetic vitals generator whose exact output is golden-pinned in packages/vitals-sim/golden/. Everything downstream of the simulator is planned and carries its commit number in the table below.
+Two packages are real: [packages/protocol](../packages/protocol) — the wire contract, a strict zod `vitalsFrameSchema` with transport-validity bounds and the `frameKey` identity — and [packages/vitals-sim](../packages/vitals-sim), a deterministic synthetic vitals generator whose exact output is golden-pinned in packages/vitals-sim/golden/. The C5 server skeleton in [apps/server](../apps/server) is real too — /healthz and an OpenAPI stub — but every chain stage it will host (ingest onward) is still planned. Each planned stage carries its commit number in the table below.
 
 ## Scaling chain
 
@@ -23,7 +23,7 @@ flowchart LR
 | --- | ---------------------- | --------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------- |
 | 1   | BLE device             | packages/vitals-sim frames  | wearable speaking BLE GATT (hardware out of scope — DISCLAIMER.md) | sim shipped (C2); simulator transport planned — C14; BLE GATT doc — C15    |
 | 2   | iOS gateway            | simulator transport in-app  | CoreBluetooth central, background streaming                        | planned — C14–C15                                                          |
-| 3   | WebSocket ingestion    | Fastify WS endpoint         | same, horizontally scaled                                          | planned — C6 (Fastify skeleton at C5)                                      |
+| 3   | WebSocket ingestion    | Fastify WS endpoint         | same, horizontally scaled                                          | planned — C6 (Fastify skeleton shipped — C5)                               |
 | 4   | Event queue            | in-process ring buffer      | SQS                                                                | planned — C6 (ring buffer); SQS is target architecture, no commit assigned |
 | 5   | Stream processor       | sliding-window alert engine | same, consuming SQS                                                | planned — C7                                                               |
 | 6   | Storage                | ring-buffer window only     | S3 raw archive + time-series read model                            | planned — C6, C19                                                          |
