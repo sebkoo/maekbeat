@@ -56,6 +56,8 @@ Rules for every AI session in this repo. They are not suggestions.
 - All repo content in English; Korean glosses for names and etymology
   (README, ADR-0001) are the exception. Conventional Commits. No
   destructive git operations outside this repository.
+- All session communication and reports in English, including final
+  session reports.
 
 ## HARD SCOPE
 
