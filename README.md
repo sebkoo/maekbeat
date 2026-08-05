@@ -12,7 +12,7 @@ Out of scope: real medical algorithms · real BLE hardware · protected health i
 <details>
 <summary>Not an engineer? The 60-second version</summary>
 
-Imagine a bracelet that counts heartbeats while someone sleeps. Maekbeat is every pipe planned between that bracelet and the family's screen: a fake bracelet (software, planned as packages/vitals-sim), a phone app that listens to it, a cloud that stores the numbers, a webpage where a caregiver watches them, and a nudge when the numbers look strange. The bracelet is imaginary, the numbers are invented, and the pipes are being built in the open — the Status board below shows what exists today.
+Imagine a bracelet that counts heartbeats while someone sleeps. Maekbeat is every pipe planned between that bracelet and the family's screen: a fake bracelet (software — packages/vitals-sim, built), a phone app that listens to it, a cloud that stores the numbers, a webpage where a caregiver watches them, and a nudge when the numbers look strange. The bracelet is imaginary, the numbers are invented, and the pipes are being built in the open — the Status board below shows what exists today.
 
 </details>
 
@@ -59,7 +59,7 @@ git clone https://github.com/sebkoo/maekbeat.git && cd maekbeat && ./scripts/boo
 ```text
 apps/        ios · server · web — planned, C5–C17
 packages/    protocol (shared vitals contract: types + zod schemas)
-             vitals-sim (synthetic HR/SpO2/respiration/motion) — planned, C2
+             vitals-sim (deterministic synthetic vitals: rest, motion, anomaly)
 infra/       AWS CDK stacks — planned, C19
 docs/        adr · ai · ROADMAP.md · DECISIONS.md
 .githooks/   pre-commit formatting + trailer checks
