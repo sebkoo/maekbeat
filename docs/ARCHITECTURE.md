@@ -21,8 +21,8 @@ flowchart LR
 
 | #   | Stage                  | Dev form                    | Target form                                                        | Status                                                                                              |
 | --- | ---------------------- | --------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| 1   | BLE device             | packages/vitals-sim frames  | wearable speaking BLE GATT (hardware out of scope — DISCLAIMER.md) | sim shipped (C2); simulator transport planned — C14; BLE GATT doc — C15                             |
-| 2   | iOS gateway            | simulator transport in-app  | CoreBluetooth central, background streaming                        | planned — C14–C15                                                                                   |
+| 1   | BLE device             | packages/vitals-sim frames  | wearable speaking BLE GATT (hardware out of scope — DISCLAIMER.md) | sim shipped (C2); simulator transport shipped — C14; BLE GATT doc — C15                             |
+| 2   | iOS gateway            | simulator transport in-app  | CoreBluetooth central, background streaming                        | dev form shipped — C14 (apps/ios, reads the fan-out); CoreBluetooth — C15                           |
 | 3   | WebSocket ingestion    | Fastify WS endpoint         | same, horizontally scaled                                          | dev form shipped — C6 (apps/server/src/ingest.ts); scaling — C19                                    |
 | 4   | Event queue            | in-process ring buffer      | SQS                                                                | ring buffer shipped — C6 (apps/server/src/store.ts); SQS is target architecture, no commit assigned |
 | 5   | Stream processor       | sliding-window alert engine | same, consuming SQS                                                | dev form shipped — C7 (apps/server/src/alerts.ts); SQS consumption is target                        |

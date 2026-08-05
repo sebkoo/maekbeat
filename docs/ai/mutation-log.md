@@ -69,8 +69,8 @@ mutation proves only what it mutates.
 
 ## C12a — semantic eviction
 
-Each guard is broken twice: by mutating the thing it names, and by mutating the
-thing next to it.
+Each guard is broken by mutating the thing it names and, where a neighbour
+existed, by mutating that too — the rows with `—` in the third column had none.
 
 | Guard                               | Own mutation                                        | Neighbour mutation                                      | Result |
 | ----------------------------------- | --------------------------------------------------- | ------------------------------------------------------- | ------ |
@@ -113,3 +113,119 @@ test in the repo and obvious to the smoke suite in under two seconds.
 
 That is the reach this commit buys: not the specific bugs already caught, but
 the class of defect that lives between the pieces.
+
+## C14 — iOS scaffold, SwiftLint, simulator transport
+
+Each guard is broken by mutating the thing it names and, where a neighbour
+existed, by mutating that too — the C12a convention, with the same `—` for rows
+that had none. Logic mutations were run against `swift test`; the render, lint,
+coverage, app-build, and CI-guard rows were run against the gate that owns them.
+
+### The cross-language contract
+
+| Guard                           | Own mutation                            | Neighbour mutation                          | Result |
+| ------------------------------- | --------------------------------------- | ------------------------------------------- | ------ |
+| golden decode, field by field   | rename `spo2Pct` in the fixture bytes   | rename the same field on the Swift type     | caught |
+| golden key set, both directions | add `batteryPct` to every fixture frame | delete `respirationRpm` from the Swift type | caught |
+| the header line's shape         | rename the header's `tickMs`            | —                                           | caught |
+| transport bounds                | drop the SpO2 bound from `validated()`  | drop the protocol-version check             | caught |
+
+The added-field row is the one that earns the round-trip: a plain decode passes
+it, because Swift's `Codable` ignores keys it does not know where
+`z.strictObject` rejects them. Comparing the re-encoded key set with the
+fixture's is what turns that silence into a failure.
+
+### The transport
+
+| Guard                                  | Own mutation                            | Neighbour mutation                        | Result |
+| -------------------------------------- | --------------------------------------- | ----------------------------------------- | ------ |
+| a re-open asks the caller to back-fill | drop the `onReconnect` call             | fire it on the first open too             | caught |
+| state is reported on transitions only  | report on every attempt                 | say "reconnecting" before ever connecting | caught |
+| a pending retry dies with the screen   | drop `cancelRetry?()` from `close()`    | drop `socket?.close()` from `close()`     | caught |
+| nothing is delivered after close       | drop the guard in `handleMessage`       | —                                         | caught |
+| backoff is capped                      | remove the 15 s cap                     | —                                         | caught |
+| a socket built after close is closed   | hand it to the field without checking   | —                                         | caught |
+| the back-fill resumes from the newest  | ask for the whole window instead        | —                                         | caught |
+| unreachable is not the same as refused | make every failure read as disconnected | —                                         | caught |
+
+### The device screen
+
+| Guard                               | Own mutation                        | Neighbour mutation                           | Result |
+| ----------------------------------- | ----------------------------------- | -------------------------------------------- | ------ |
+| identity is `(sessionEpoch, seq)`   | key frames on `seq` alone           | key them on the device clock                 | caught |
+| a late arrival lands at its capture | append every frame                  | —                                            | caught |
+| the window is bounded               | drop the trim                       | —                                            | caught |
+| one episode is one row              | append alerts instead of replacing  | key the replacement on metric, not `alertId` | caught |
+| the newest decision is in force     | always overwrite                    | never overwrite                              | caught |
+| a rejected message is counted       | drop the counter                    | —                                            | caught |
+| empty is a state, not a short list  | render an empty device list as data | —                                            | caught |
+
+### The honesty guards
+
+| Guard                               | Own mutation                                 | Neighbour mutation                          | Result |
+| ----------------------------------- | -------------------------------------------- | ------------------------------------------- | ------ |
+| no radio this app does not have     | add a `CBCentralManager` mention to a view   | add an App Store line to `Copy`             | caught |
+| the disclaimer is on screen         | drop `DisclaimerBar()` from `RootView`       | soften the words to "for informational use" | caught |
+| the network lives in two files      | name `URLSession` in a view                  | —                                           | caught |
+| the app shell stays a shell         | add twelve lines of logic to it              | add a second file to `App/`                 | caught |
+| every screen renders in every state | make `StatusPanelView` return an `EmptyView` | —                                           | caught |
+
+### The gates themselves
+
+| Guard                       | Mutation                                                         | Result                                                       |
+| --------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------ |
+| the coverage ratchet bites  | raise the threshold to 95, above the 91.37% floor                | caught                                                       |
+| the gate fails loudly       | point it at a target name the report does not carry              | caught — exits 1 rather than passing on an empty match       |
+| SwiftLint `--strict`        | add a force unwrap to `Format`                                   | caught                                                       |
+| the app-shell build gate    | make the shell call `RootView` with a parameter it does not have | caught by `build-app.sh`; the package suite stays green      |
+| no directory is gate-exempt | create `apps/fake/` with no `package.json`                       | caught — the CI guard's catch-all fails a new one by default |
+
+The last two rows are the C13 lesson in this language. The app-shell mutation is
+invisible to every test in the package — the library compiles and its 90 tests
+pass — and the thing a person can launch does not build. The `apps/fake/` row is
+the hole this commit was written to close: before it, a directory that pnpm
+cannot see contributed nothing to any gate and nothing said so.
+
+Five of those rows exist because of the adversarial pass, not the first round,
+and each was green before it: the `ios` job could be deleted whole and the guard
+written to prevent it applauded, because its `grep` matched its own text; a
+second SwiftPM target shipped 26 untested lines with the gate reporting the same
+91.37%, and could not be caught in the report at all, since a target with no
+exercised code produces no row to object to — so it is caught at the manifest
+instead; a Swift file named by the pbxproj from outside `App/` compiled into the
+app while `.swiftlint.yml`'s `included:` list silently overrode the path
+`lint.sh` passes, so it was neither linted nor scanned nor measured; the
+threshold had an environment override, which CLAUDE.md forbids and CI could have
+been handed; and `DisclaimerBar()` could be moved inside the `NavigationStack`,
+where every push replaces it, with all 83 tests green, because the scan asked
+whether the bar was rendered and not where.
+
+### Scope ranges stated in more than one place
+
+`scripts/check-scope-ranges.sh` exists because the board rule did not cover the
+Stack table: at C14 it still said the server ended at C11 and the web at C11,
+two sections below a repository tour that already said C12 and C13. Nothing was
+wrong with the board rule as written — it named the progress board, and the
+progress board was correct. The drift was in the sentences beside it.
+
+| Guard                                | Own mutation                                        | Neighbour mutation                                 | Result             |
+| ------------------------------------ | --------------------------------------------------- | -------------------------------------------------- | ------------------ |
+| the three statements agree           | leave the Stack web row at C10–C11 (the real drift) | leave the Stack server row at C5–C11               | caught             |
+| the tour cannot advance alone        | move the tour to C10–C14, Stack table unchanged     | leave `apps/server/README.md`'s headline at C5–C12 | caught             |
+| the iOS row is really read           | set the Stack iOS range to C13                      | set the tour's iOS range to C15                    | caught             |
+| a headline cannot drift              | set `apps/ios/README.md` to C15                     | —                                                  | caught             |
+| the check cannot match nothing       | reword the Stack cell out of the shape it reads     | —                                                  | caught             |
+| a planned range is not a shipped one | extend the iOS row's "CoreBluetooth planned, C15"   | —                                                  | no fire, correctly |
+
+The last row is a negative control rather than a proof: the iOS Stack cell
+states a shipped C14 and a planned C15 in one sentence, and a guard that read
+the last number on the line would call the app shipped through C15. Extending
+the planned half must leave the check silent, and it does.
+
+One test in this commit passed vacuously while it was being written, which is
+the class the 2026-08-05 amendment in [AI_USAGE.md](AI_USAGE.md) is about.
+`StreamClient` holds only weak references to itself inside its socket handlers,
+so several transport tests that left the client to a local `let` were asserting
+against an object ARC had already released: every assertion about what it did
+held, because it did nothing. The suite now keeps the client on the test case
+for its lifetime, and the reason is written where the next reader will hit it.

@@ -37,7 +37,19 @@ Pre-ship checklist. Run every step; fix findings before committing.
    grep -oE '!\[[^]]*\]\((https://img\.shields\.io|https://github\.com/[^)]*badge\.svg|https://codecov\.io)[^)]*\)' README.md | wc -l
    ```
 
-6. README progress board updated in the same commit as any scope change.
+6. README progress board updated in the same commit as any scope change — and
+   with it every other statement of the same scope. The three mechanical ones
+   are checked; the rest are read:
+
+   ```sh
+   bash scripts/check-scope-ranges.sh
+   ```
+
+   Not covered by that script, so check by eye: the README Design notes rows
+   and the Status board's own Ships column, `docs/ARCHITECTURE.md`'s stage
+   table, and the "shipped — C(n)" asides in DISCLAIMER.md, SECURITY.md and
+   `packages/*/README.md`.
+
 7. Hooks active: `git config core.hooksPath` must print `.githooks`.
 8. `npx --yes prettier@3.9.6 --check --ignore-unknown .`
 9. `npx --yes markdownlint-cli2@0.23.2 "**/*.md" "#**/node_modules"`

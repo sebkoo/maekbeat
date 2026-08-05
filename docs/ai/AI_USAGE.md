@@ -11,6 +11,7 @@ One row per identifier, read from the execution environment at the time the work
 | C0–C9                           | claude-fable-5                                            | 2026-08-04 |
 | C10 — implementation            | claude-fable-5                                            | 2026-08-05 |
 | C10 — adversarial review agents | claude-opus-5                                             | 2026-08-05 |
+| C14 — implementation and review | claude-opus-5[1m]                                         | 2026-08-05 |
 
 Model identifiers may be preview names not yet listed in Anthropic's public model documentation as of the recording date.
 

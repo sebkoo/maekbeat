@@ -75,7 +75,13 @@ Rules for every AI session in this repo. They are not suggestions.
 ## PROCESS
 
 - README progress board is updated in the same commit as every scope
-  change. `docs/ROADMAP.md` is the plan of record.
+  change — and so is every other place stating the same scope: the
+  repository tour, the Stack table, the Design notes rows, each app's
+  README headline range, and the "shipped — C(n)" asides in DISCLAIMER.md,
+  SECURITY.md, docs/ARCHITECTURE.md and `packages/*/README.md`.
+  `scripts/check-scope-ranges.sh` enforces the three mechanical ones and
+  runs in the CI hygiene job; the rest are a `/ship-check` read.
+  `docs/ROADMAP.md` is the plan of record.
 - Coverage thresholds (each package's `vitest.config.ts`) are a ratchet:
   they move only up, each raise its own deliberate commit, and they are
   never overridden downward by CLI flags in package scripts or CI. The

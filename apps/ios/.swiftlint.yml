@@ -1,0 +1,83 @@
+# SwiftLint for apps/ios. Run with --strict (apps/ios/scripts/lint.sh), so every
+# violation below is an error and the job fails on it.
+
+# No `included:` list on purpose. It would override the path scripts/lint.sh
+# passes, so a Swift file added anywhere else under apps/ios would compile into
+# the app and never be linted. The path argument governs; `excluded` only keeps
+# build output out.
+# Globbed rather than listed: build output appears under the package directory
+# too, and a plain `.build` here resolves only against this file's directory.
+# CI would not have noticed — it lints a fresh checkout before anything builds —
+# so this is what keeps the local run and the CI run the same command.
+excluded:
+  - "**/.build"
+  - "**/.build-xcode"
+  - "**/.xcresult"
+  - "**/.swiftpm"
+
+# Rules beyond the default set. Each one is here because it protects something
+# this repository already cares about somewhere else.
+opt_in_rules:
+  # A force unwrap in a view is a crash in front of a caregiver.
+  - force_unwrapping
+  # An empty catch swallows the failure states apps/web spent C10 designing.
+  - overridden_super_call
+  - redundant_nil_coalescing
+  - closure_spacing
+  - collection_alignment
+  - contains_over_filter_count
+  - empty_count
+  - empty_string
+  - explicit_init
+  - first_where
+  - implicitly_unwrapped_optional
+  - last_where
+  - literal_expression_end_indentation
+  - multiline_arguments
+  - operator_usage_whitespace
+  - prefer_self_in_static_references
+  - sorted_first_last
+  - toggle_bool
+  - unneeded_parentheses_in_closure_argument
+  - vertical_parameter_alignment_on_call
+  - yoda_condition
+
+line_length:
+  warning: 110
+  error: 110
+  ignores_comments: false
+  ignores_urls: true
+
+# The prose in this repository is deliberately long-form; type and file length
+# limits are set where they catch a god object rather than a documented one.
+file_length:
+  warning: 400
+  error: 400
+type_body_length:
+  warning: 300
+  error: 300
+function_body_length:
+  warning: 60
+  error: 60
+
+identifier_name:
+  # `v` is the protocol version field on the wire. Renaming it to satisfy a
+  # linter would break the contract the goldens pin.
+  excluded:
+    - v
+    - id
+
+# Test method names in this repository are sentences on purpose: the failure
+# output is meant to read as a statement about the system.
+type_name:
+  max_length:
+    warning: 60
+    error: 60
+
+nesting:
+  type_level: 2
+
+# force_unwrapping is opt-in above; these two stay on for tests as well, because
+# a crashing test is a test that reports nothing.
+force_cast: error
+force_try: error

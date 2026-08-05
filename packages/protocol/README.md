@@ -3,9 +3,18 @@
 The wire contract every Maekbeat component shares: TypeScript types and zod schemas
 for the vitals frame. This package is the source of truth, imported by three
 components today: packages/vitals-sim emits these frames (since C2), apps/server
-validates every inbound frame against them (since C6), and apps/web parses the
+validates every inbound frame against them (since C6), apps/web parses the
 frames and alert events inside each response with `vitalsFrameSchema` and
-`alertEventSchema` (since C10). The iOS app will mirror it in Swift (planned — C14).
+`alertEventSchema` (since C10), and apps/ios mirrors it in hand-written Swift
+`Codable` types (since C14).
+
+Swift has no zod, and nothing generates those types. What keeps them from
+drifting is that apps/ios decodes the same `packages/vitals-sim/golden`
+fixtures the TypeScript golden suite pins, so a rename on either side breaks a
+test against bytes neither language owns. The limits of that — the alert and
+decision shapes have no cross-language fixture, and Swift's `Codable` ignores
+unknown keys where `z.strictObject` rejects them — are tabulated in
+apps/ios/README.md.
 
 ## Vitals frame
 
@@ -44,7 +53,8 @@ Notes on the contract:
   mislabeled into the new epoch — it can re-store an already-stored frame, drag
   the high-water mark back up, and fork a further spurious session. The C15
   gateway must therefore resume from its last delivered `seq` on reconnect and
-  never replay older frames; removing these limits outright would take a
+  never replay older frames — the C14 app is a reader on the fan-out socket and
+  sends nothing, so it cannot yet exercise this; removing these limits outright would take a
   wire-level boot id, i.e. a `v` bump.
 - The wire frame carries one timestamp, `capturedAtMs` (device clock). It has no
   freshness bound at the contract level — freshness is an ingest-time check — and the

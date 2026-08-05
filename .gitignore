@@ -22,7 +22,10 @@ DerivedData/
 xcuserdata/
 *.xcuserstate
 .build/
+.swiftpm/
 *.xcresult
+apps/ios/.build-xcode/
+apps/ios/.xcresult/
 
 # Note: .claude/ and .githooks/ are tracked; do not ignore them.
 # Playwright

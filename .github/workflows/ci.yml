@@ -8,7 +8,10 @@ on:
 
 jobs:
   # Proves every commit message in history is trailer-free (G1) and Conventional-Commit
-  # formed (G2), and that the commit-msg hook itself still enforces both.
+  # formed (G2), that the commit-msg hook itself still enforces both, and that the
+  # README's three statements of each app's shipped commit range still agree —
+  # the board rule covered the progress board only, and the Stack table drifted
+  # two commits behind the tour above it before anything noticed (C14).
   hygiene:
     runs-on: ubuntu-latest
     steps:
@@ -17,6 +20,7 @@ jobs:
           fetch-depth: 0
       - run: bash scripts/test-githooks.sh
       - run: bash scripts/check-commit-hygiene.sh
+      - run: bash scripts/check-scope-ranges.sh
 
   # Proves the workspace packages pass their vitest suites and typechecks (first package: C1).
   # Since C9 the suites run once, coverage-enabled: each package's vitest.config.ts
@@ -55,6 +59,40 @@ jobs:
               echo "coverage report for $dir is not uploaded in .github/workflows/ci.yml"
               exit 1
             }
+          done
+          # Everything above assumes a directory pnpm can see. apps/ios (C14) is
+          # the first that it cannot: no package.json, so `pnpm -r` skips it
+          # silently and the two checks above have nothing to say about it —
+          # the exact hole C9 closed for the web, reopened by a new language.
+          # So every non-Node directory under apps/, packages/ or infra/ must
+          # name the gate that covers it, and the catch-all fails a new one by
+          # default — including one in a language nobody has added yet.
+          for dir in apps/* packages/* infra/*; do
+            [ -d "$dir" ] || continue
+            [ -f "$dir/package.json" ] && continue
+            case "$dir" in
+              apps/ios)
+                # Anchored to the step as CI would execute it, not to the
+                # substring: an unanchored grep for this path matches the
+                # guard's own line, so deleting the whole ios job below would
+                # leave this check applauding itself.
+                grep -qE '^ *- run: apps/ios/scripts/test\.sh *$' .github/workflows/ci.yml || {
+                  echo "no step in this workflow runs the apps/ios test + coverage gate"
+                  exit 1
+                }
+                # Likewise anchored: "|| true" appended to the call, or the call
+                # replaced by a comment mentioning it, must not pass.
+                grep -qE '^"\$here/coverage-gate\.sh" "\$result"$' apps/ios/scripts/test.sh || {
+                  echo "apps/ios/scripts/test.sh no longer runs the coverage gate unconditionally"
+                  exit 1
+                }
+                ;;
+              *)
+                echo "$dir is neither a pnpm package nor a directory this guard"
+                echo "knows how to gate. Add its gate, then name it here."
+                exit 1
+                ;;
+            esac
           done
       - run: pnpm -r test:coverage
       - run: pnpm -r typecheck
@@ -118,6 +156,50 @@ jobs:
       - if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: pnpm --filter @maekbeat/web exec playwright install-deps chromium
       - run: pnpm --filter @maekbeat/web test:e2e
+
+  # Proves the iOS app of C14: SwiftLint clean, the app shell compiles for a
+  # simulator, and the MaekbeatKit suite passes with line coverage above its
+  # threshold. This job is the whole reason apps/ios is not gate-exempt — it is
+  # invisible to `pnpm -r test:coverage`, so it carries its own ratchet
+  # (apps/ios/scripts/coverage-gate.sh) and the tests job above asserts that
+  # this job still calls it.
+  #
+  # macos-latest is billed at nothing here: standard GitHub-hosted runners are
+  # free and unmetered for public repositories, macOS included, and only the
+  # larger runners are charged (checked 2026-08-05 against GitHub's Actions
+  # billing documentation). The image's default Xcode is what runs, echoed by
+  # the first step rather than pinned — pinning a version the image later drops
+  # breaks CI on Apple's release schedule instead of on a change to this repo.
+  # The language does not float with it: the package is swift-tools-version 5.10
+  # and the app target builds at SWIFT_VERSION 5.0.
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The goldens in packages/vitals-sim are decoded by the Swift contract
+      # test from this same checkout; nothing is copied into apps/ios.
+      - run: |
+          xcodebuild -version
+          swift --version
+      # Pinned and checksummed, the way the docs gates pin prettier and
+      # markdownlint. brew's version floats, and a linter that changes under a
+      # commit turns a clean diff red for reasons the diff did not cause.
+      - name: Install SwiftLint 0.65.0
+        env:
+          SWIFTLINT_VERSION: 0.65.0
+          SWIFTLINT_SHA256: d6cb0aa7a2f5f1ef306fc9e37bcb54dc9a26facc8f7784ac0c3dd3eccf5c6ba6
+        run: |
+          url="https://github.com/realm/SwiftLint/releases/download/${SWIFTLINT_VERSION}/portable_swiftlint.zip"
+          curl -sSLf -o /tmp/swiftlint.zip "$url"
+          echo "${SWIFTLINT_SHA256}  /tmp/swiftlint.zip" | shasum -a 256 -c -
+          unzip -q /tmp/swiftlint.zip -d /tmp/swiftlint
+          sudo install /tmp/swiftlint/swiftlint /usr/local/bin/swiftlint
+      - run: apps/ios/scripts/lint.sh
+      # Before the tests, because the shell is the part no unit test links: a
+      # library can be green inside an app that does not compile (C12a's lesson,
+      # one target out).
+      - run: apps/ios/scripts/build-app.sh
+      - run: apps/ios/scripts/test.sh
 
   # Proves the repository docs pass the same prettier and markdownlint gates the pre-commit hook enforces.
   docs-lint:

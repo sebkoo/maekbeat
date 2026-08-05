@@ -1,6 +1,6 @@
 # @maekbeat/web
 
-The caregiver dashboard, C10–C12 of [docs/ROADMAP.md](../../docs/ROADMAP.md): a React 19 + Vite + TypeScript app with the design tokens the rest of Phase 4 draws from, a typed client for the [apps/server](../server) surface, and — since C11 — live vitals over the fan-out WebSocket. C12 adds the alert timeline, server-recorded acknowledgement, and the WCAG 2.2 AA pass.
+The caregiver dashboard, C10–C13 of [docs/ROADMAP.md](../../docs/ROADMAP.md): a React 19 + Vite + TypeScript app with the design tokens the rest of Phase 4 draws from, a typed client for the [apps/server](../server) surface, and — since C11 — live vitals over the fan-out WebSocket. C12 adds the alert timeline, server-recorded acknowledgement, and the WCAG 2.2 AA pass.
 
 ## Run it
 
@@ -17,7 +17,7 @@ Point the dashboard at a server with `VITE_API_BASE_URL` ([.env.example](.env.ex
 
 ## Third consumer of the wire contract
 
-apps/web imports [@maekbeat/protocol](../../packages/protocol) directly, after [packages/vitals-sim](../../packages/vitals-sim) (C2) and [apps/server](../server) (C6), and before the iOS app mirrors it in Swift (planned — C14). Frames and alert events are parsed with the shared schemas themselves in [src/api/contracts.ts](src/api/contracts.ts), so a server that drifts from the contract fails the read here instead of painting a wrong number.
+apps/web imports [@maekbeat/protocol](../../packages/protocol) directly, after [packages/vitals-sim](../../packages/vitals-sim) (C2) and [apps/server](../server) (C6), and before [apps/ios](../ios) mirrors it in hand-written Swift (C14, checked against the same golden fixtures). Frames and alert events are parsed with the shared schemas themselves in [src/api/contracts.ts](src/api/contracts.ts), so a server that drifts from the contract fails the read here instead of painting a wrong number.
 
 Strictness splits on purpose. Frames and alert events stay strict — an unknown key means a corrupted payload and a real change bumps the protocol version — while the listing and page envelopes around them are permissive, so an added server counter cannot blank a caregiver's screen.
 

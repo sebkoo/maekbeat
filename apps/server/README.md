@@ -1,6 +1,6 @@
 # @maekbeat/server
 
-The Maekbeat API server, C5–C12 of [docs/ROADMAP.md](../../docs/ROADMAP.md): WebSocket vitals ingest validated against [@maekbeat/protocol](../../packages/protocol), a bounded per-device ring buffer, a sliding-window alert engine, REST reads, and the WebSocket fan-out that feeds [apps/web](../web) — all in the OpenAPI document.
+The Maekbeat API server, C5–C12a of [docs/ROADMAP.md](../../docs/ROADMAP.md): WebSocket vitals ingest validated against [@maekbeat/protocol](../../packages/protocol), a bounded per-device ring buffer, a sliding-window alert engine, REST reads, and the WebSocket fan-out that feeds [apps/web](../web) — all in the OpenAPI document.
 
 ## Run it
 
@@ -56,7 +56,7 @@ The push leg of [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) stage 7, in i
 
 On subscribe the socket sends `{type:"ready", deviceId, serverTimeMs, ringCapacity}`, then one `{type:"frame", frame}` per accepted frame and one `{type:"alert", alert}` per lifecycle transition, both shaped by `streamMessageSchema` in [@maekbeat/protocol](../../packages/protocol). Publishing happens after the engine has judged the frame, so a dashboard never sees an alert before the frame that raised it, and deduped frames never reach it at all.
 
-Subscribing to a device the server has never seen is allowed and stays silent until its first frame — a monitor that had to wait for data before attaching would miss the data it was waiting for. A subscriber whose socket dies mid-send is dropped without disturbing ingest for that device, and the close handler unsubscribes it. `ringCapacity` is sent so a client knows the largest window a reconnect could recover; anything evicted past it is gone, and [apps/web](../web) renders that as a gap rather than a join.
+Subscribing to a device the server has never seen is allowed and stays silent until its first frame — a monitor that had to wait for data before attaching would miss the data it was waiting for. A subscriber whose socket dies mid-send is dropped without disturbing ingest for that device, and the close handler unsubscribes it. `ringCapacity` is sent so a client knows the largest window a reconnect could recover; anything evicted past it is gone, and [apps/web](../web) renders that as a gap rather than a join. Since C14 the route has a second kind of subscriber: the [apps/ios](../ios) app reads it with the same rules and the same backoff numbers.
 
 ## Acknowledgement — `POST /devices/:deviceId/alerts/:alertId/decisions` (since C12)
 
