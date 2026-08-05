@@ -1,4 +1,4 @@
-import type { AlertEvent } from "@maekbeat/protocol";
+import type { AlertDecisionEvent, AlertEvent } from "@maekbeat/protocol";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -6,7 +6,15 @@ import { describe, expect, it, vi } from "vitest";
 import type { DeviceStreamHandlers, MaekbeatApi } from "../api/client";
 import type { StoredFrame } from "../api/contracts";
 import { ApiProvider } from "./api-context";
-import { MAX_FRAMES, mergeAlerts, mergeFrames, useLiveDevice } from "./useLiveDevice";
+import { latestDecisions } from "@maekbeat/protocol";
+
+import {
+  MAX_FRAMES,
+  mergeAlerts,
+  mergeDecisions,
+  useLiveDevice,
+  mergeFrames,
+} from "./useLiveDevice";
 
 const BASE_MS = 1_754_000_000_000;
 
@@ -55,9 +63,20 @@ function fakeApi(initial: StoredFrame[]) {
   ) as unknown as ReturnType<typeof vi.fn> & { nextFrames?: StoredFrame[] };
   const restAlerts = vi.fn(async () => ({
     deviceId: "dev-1",
-    counters: { raised: 1, resolved: 0, suppressed: 2 },
+    counters: { raised: 1, resolved: 0, suppressed: 2, acknowledged: 0, dismissed: 0 },
     alerts: [] as AlertEvent[],
+    decisions: [] as AlertDecisionEvent[],
   }));
+  const recordDecision = vi.fn(
+    async (deviceId: string, alertId: string, decision: "acknowledged" | "dismissed") => ({
+      eventId: `${deviceId}:decision:1`,
+      alertId,
+      deviceId,
+      decision,
+      actor: "web-dashboard",
+      recordedAtMs: BASE_MS + 90_000,
+    }),
+  );
 
   const api: MaekbeatApi = {
     baseUrl: "http://api.test",
@@ -74,6 +93,7 @@ function fakeApi(initial: StoredFrame[]) {
     }),
     readFrames: restFrames as unknown as MaekbeatApi["readFrames"],
     readAlerts: restAlerts as unknown as MaekbeatApi["readAlerts"],
+    recordDecision: recordDecision as unknown as MaekbeatApi["recordDecision"],
     subscribe: (_deviceId, streamHandlers) => {
       handlers = streamHandlers;
       return {
@@ -90,6 +110,7 @@ function fakeApi(initial: StoredFrame[]) {
     closed,
     restFrames,
     restAlerts,
+    recordDecision,
     handlers: () => handlers,
   };
 }
@@ -148,6 +169,49 @@ describe("mergeAlerts", () => {
     expect(mergeAlerts([later], [ALERT]).map((a) => a.alertId)).toEqual([ALERT.alertId, "b"]);
     const current = [ALERT];
     expect(mergeAlerts(current, [])).toBe(current);
+  });
+});
+
+describe("mergeDecisions", () => {
+  const event = (overrides: Partial<AlertDecisionEvent> = {}): AlertDecisionEvent => ({
+    eventId: "dev-1:decision:1",
+    alertId: ALERT.alertId,
+    deviceId: "dev-1",
+    decision: "acknowledged",
+    actor: "web-dashboard",
+    recordedAtMs: BASE_MS,
+    ...overrides,
+  });
+
+  it("unions by eventId — the log is appended to, never replaced", () => {
+    const merged = mergeDecisions(
+      [event()],
+      [event({ eventId: "dev-1:decision:2", decision: "dismissed", recordedAtMs: BASE_MS + 1 })],
+    );
+    expect(merged.map((e) => e.decision)).toEqual(["acknowledged", "dismissed"]);
+    const current = [event()];
+    expect(mergeDecisions(current, [])).toBe(current);
+  });
+
+  // Two decisions inside one millisecond must order by the server's append
+  // counter, not by which socket message happened to arrive first.
+  it("breaks a timestamp tie on the server's append order", () => {
+    const later = event({ eventId: "dev-1:decision:9", decision: "dismissed" });
+    const earlier = event({ eventId: "dev-1:decision:8" });
+
+    const merged = mergeDecisions([later], [earlier]);
+
+    expect(merged.map((e) => e.eventId)).toEqual(["dev-1:decision:8", "dev-1:decision:9"]);
+    expect(latestDecisions(merged).get(ALERT.alertId)?.decision).toBe("dismissed");
+  });
+
+  it("orders an eventId it cannot read last rather than throwing", () => {
+    const odd = event({ eventId: "malformed" });
+    const numbered = event({ eventId: "dev-1:decision:3", decision: "dismissed" });
+    expect(mergeDecisions([numbered], [odd]).map((e) => e.eventId)).toEqual([
+      "malformed",
+      "dev-1:decision:3",
+    ]);
   });
 });
 
@@ -330,6 +394,25 @@ describe("useLiveDevice", () => {
     expect(result.current.state.status).toBe("loading");
   });
 
+  it("holds a decision that arrives before the window exists", async () => {
+    const fake = fakeApi([frame(1)]);
+    const { result } = renderHook(() => useLiveDevice("dev-1"), { wrapper: wrapper(fake.api) });
+
+    act(() =>
+      fake.handlers()?.onDecision({
+        eventId: "dev-1:decision:1",
+        alertId: ALERT.alertId,
+        deviceId: "dev-1",
+        decision: "acknowledged",
+        actor: "night-shift",
+        recordedAtMs: BASE_MS + 5_000,
+      }),
+    );
+    await waitFor(() => expect(result.current.state.status).toBe("ready"));
+
+    expect(result.current.decisions.get(ALERT.alertId)?.actor).toBe("night-shift");
+  });
+
   it("counts malformed messages instead of rendering them", async () => {
     const fake = fakeApi([frame(1)]);
     const { result } = renderHook(() => useLiveDevice("dev-1"), { wrapper: wrapper(fake.api) });
@@ -338,6 +421,140 @@ describe("useLiveDevice", () => {
     act(() => fake.handlers()?.onInvalidMessage?.());
     act(() => fake.handlers()?.onInvalidMessage?.());
     expect(result.current.malformed).toBe(2);
+  });
+
+  it("records a decision and reads it back from the appended log", async () => {
+    const fake = fakeApi([frame(1)]);
+    const { result } = renderHook(() => useLiveDevice("dev-1"), { wrapper: wrapper(fake.api) });
+    await waitFor(() => expect(result.current.state.status).toBe("ready"));
+    act(() => fake.handlers()?.onAlert(ALERT));
+
+    await act(async () => {
+      await result.current.decide(ALERT.alertId, "acknowledged");
+    });
+
+    expect(fake.recordDecision).toHaveBeenCalledWith("dev-1", ALERT.alertId, "acknowledged");
+    expect(result.current.decisions.get(ALERT.alertId)?.decision).toBe("acknowledged");
+    expect(result.current.pendingDecisions.size).toBe(0);
+    expect(result.current.decisionFailures.size).toBe(0);
+  });
+
+  // The rule: nothing claims a decision until the server has appended one.
+  it("shows no decision at all when the server refuses one", async () => {
+    const fake = fakeApi([frame(1)]);
+    fake.recordDecision.mockRejectedValueOnce(new Error("unknown alert"));
+    const { result } = renderHook(() => useLiveDevice("dev-1"), { wrapper: wrapper(fake.api) });
+    await waitFor(() => expect(result.current.state.status).toBe("ready"));
+
+    await act(async () => {
+      await result.current.decide(ALERT.alertId, "acknowledged");
+    });
+
+    expect(result.current.decisions.has(ALERT.alertId)).toBe(false);
+    expect(result.current.decisionFailures.get(ALERT.alertId)).toBe("unknown alert");
+    expect(result.current.pendingDecisions.size).toBe(0);
+  });
+
+  // A failure banner beside a recorded decision would be the UI denying an
+  // audit-log entry it is displaying from that very entry.
+  it("retires a failure when the decision lands from another dashboard", async () => {
+    const fake = fakeApi([frame(1)]);
+    fake.recordDecision.mockRejectedValueOnce(new Error("server hiccup"));
+    const { result } = renderHook(() => useLiveDevice("dev-1"), { wrapper: wrapper(fake.api) });
+    await waitFor(() => expect(result.current.state.status).toBe("ready"));
+
+    await act(async () => {
+      await result.current.decide(ALERT.alertId, "acknowledged");
+    });
+    expect(result.current.decisionFailures.has(ALERT.alertId)).toBe(true);
+
+    act(() =>
+      fake.handlers()?.onDecision({
+        eventId: "dev-1:decision:7",
+        alertId: ALERT.alertId,
+        deviceId: "dev-1",
+        decision: "acknowledged",
+        actor: "night-shift",
+        recordedAtMs: BASE_MS + 30_000,
+      }),
+    );
+
+    expect(result.current.decisionFailures.has(ALERT.alertId)).toBe(false);
+    expect(result.current.decisions.get(ALERT.alertId)?.actor).toBe("night-shift");
+  });
+
+  // The C11 lesson, applied to the decision path.
+  it("abandons a decision whose device changed under it", async () => {
+    const fake = fakeApi([frame(1)]);
+    let release: ((event: unknown) => void) | undefined;
+    fake.recordDecision.mockImplementationOnce(
+      () => new Promise((resolve) => (release = resolve as (event: unknown) => void)),
+    );
+    const { result, rerender } = renderHook(({ id }: { id: string }) => useLiveDevice(id), {
+      wrapper: wrapper(fake.api),
+      initialProps: { id: "dev-1" },
+    });
+    await waitFor(() => expect(result.current.state.status).toBe("ready"));
+
+    void result.current.decide(ALERT.alertId, "acknowledged");
+    rerender({ id: "dev-2" });
+    await waitFor(() => expect(result.current.state.status).toBe("ready"));
+
+    await act(async () => {
+      release?.({
+        eventId: "dev-1:decision:1",
+        alertId: ALERT.alertId,
+        deviceId: "dev-1",
+        decision: "acknowledged",
+        actor: "web-dashboard",
+        recordedAtMs: BASE_MS + 90_000,
+      });
+      await Promise.resolve();
+    });
+
+    // dev-2's window never learns about dev-1's decision.
+    expect(result.current.decisions.size).toBe(0);
+    expect(result.current.pendingDecisions.size).toBe(0);
+    expect(result.current.decisionFailures.size).toBe(0);
+  });
+
+  it("clears a previous failure when the decision is retried", async () => {
+    const fake = fakeApi([frame(1)]);
+    fake.recordDecision.mockRejectedValueOnce(new Error("server hiccup"));
+    const { result } = renderHook(() => useLiveDevice("dev-1"), { wrapper: wrapper(fake.api) });
+    await waitFor(() => expect(result.current.state.status).toBe("ready"));
+
+    await act(async () => {
+      await result.current.decide(ALERT.alertId, "acknowledged");
+    });
+    expect(result.current.decisionFailures.size).toBe(1);
+
+    await act(async () => {
+      await result.current.decide(ALERT.alertId, "acknowledged");
+    });
+
+    expect(result.current.decisionFailures.size).toBe(0);
+    expect(result.current.decisions.get(ALERT.alertId)?.decision).toBe("acknowledged");
+  });
+
+  it("takes a decision another dashboard recorded, over the socket", async () => {
+    const fake = fakeApi([frame(1)]);
+    const { result } = renderHook(() => useLiveDevice("dev-1"), { wrapper: wrapper(fake.api) });
+    await waitFor(() => expect(result.current.state.status).toBe("ready"));
+
+    act(() =>
+      fake.handlers()?.onDecision({
+        eventId: "dev-1:decision:9",
+        alertId: ALERT.alertId,
+        deviceId: "dev-1",
+        decision: "dismissed",
+        actor: "night-shift",
+        recordedAtMs: BASE_MS + 120_000,
+      }),
+    );
+
+    expect(result.current.decisions.get(ALERT.alertId)?.actor).toBe("night-shift");
+    expect(fake.recordDecision).not.toHaveBeenCalled();
   });
 
   // No socket may outlive the screen that opened it.

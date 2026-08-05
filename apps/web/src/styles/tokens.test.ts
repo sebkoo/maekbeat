@@ -168,6 +168,8 @@ describe("contrast", () => {
     // alert background (app.css, .mb-state--error / --disconnected).
     ["--mb-alert-raised-fg", "--mb-color-surface"],
     ["--mb-alert-ongoing-fg", "--mb-color-surface"],
+    // The C12 timeline draws the decision mark on the card surface.
+    ["--mb-alert-resolved-fg", "--mb-color-surface"],
     ...ALERT_STATES.map((state) => [`--mb-alert-${state}-fg`, `--mb-alert-${state}-bg`] as const),
   ];
 
@@ -176,6 +178,8 @@ describe("contrast", () => {
   // (--mb-color-border) are decorative separation and are deliberately not gated.
   const UI_PAIRS: ReadonlyArray<readonly [string, string]> = [
     ["--mb-color-border-strong", "--mb-color-surface"],
+    // The timeline row's leading edge sits on the card surface (C12).
+    ...ALERT_STATES.map((state) => [`--mb-alert-${state}-border`, "--mb-color-surface"] as const),
     ...ALERT_STATES.map(
       (state) => [`--mb-alert-${state}-border`, `--mb-alert-${state}-bg`] as const,
     ),
@@ -223,6 +227,22 @@ describe("tokens are the only source of values", () => {
       expect(code, `${path} sets inline styles`).not.toContain("style={{");
       expect(paintAttribute.test(code), `${path} paints with an attribute`).toBe(false);
     }
+  });
+
+  // WCAG 2.2 SC 2.5.8 is a layout property, and jsdom has no layout — so the
+  // guarantee is asserted where it is actually made: in the declaration.
+  it("declares a target size for every control, past the 24px minimum", () => {
+    const button = APP_CSS.slice(APP_CSS.indexOf(".mb-button {"));
+    const block = button.slice(0, button.indexOf("}"));
+    const minWidth = /min-width:\s*([\d.]+)rem/.exec(block);
+    const minHeight = /min-height:\s*([\d.]+)rem/.exec(block);
+    expect(minWidth, ".mb-button declares no min-width").not.toBeNull();
+    expect(minHeight, ".mb-button declares no min-height").not.toBeNull();
+    // rem is 16px by default and this stylesheet never changes the root size.
+    // 44 px is what the stylesheet declares and what the README claims; the
+    // SC 2.5.8 floor is 24, and pinning the larger number keeps the two honest.
+    expect(Number(minWidth?.[1]) * 16).toBeGreaterThanOrEqual(44);
+    expect(Number(minHeight?.[1]) * 16).toBeGreaterThanOrEqual(44);
   });
 
   it("keeps the network inside the two transport modules", () => {

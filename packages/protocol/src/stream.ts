@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { alertDecisionEventSchema } from "./acks";
 import { alertEventSchema } from "./alerts";
 import { vitalsFrameSchema } from "./vitals";
 
@@ -47,10 +48,17 @@ export const streamAlertSchema = z.strictObject({
   alert: alertEventSchema,
 });
 
+/** A decision recorded by any dashboard, fanned out to all of them (C12). */
+export const streamDecisionSchema = z.strictObject({
+  type: z.literal("decision"),
+  decision: alertDecisionEventSchema,
+});
+
 /** Every message a dashboard can receive on the fan-out socket. */
 export const streamMessageSchema = z.discriminatedUnion("type", [
   streamReadySchema,
   streamFrameSchema,
   streamAlertSchema,
+  streamDecisionSchema,
 ]);
 export type StreamMessage = z.infer<typeof streamMessageSchema>;

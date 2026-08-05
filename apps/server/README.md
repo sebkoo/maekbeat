@@ -1,6 +1,6 @@
 # @maekbeat/server
 
-The Maekbeat API server, C5–C11 of [docs/ROADMAP.md](../../docs/ROADMAP.md): WebSocket vitals ingest validated against [@maekbeat/protocol](../../packages/protocol), a bounded per-device ring buffer, a sliding-window alert engine, REST reads, and the WebSocket fan-out that feeds [apps/web](../web) — all in the OpenAPI document.
+The Maekbeat API server, C5–C12 of [docs/ROADMAP.md](../../docs/ROADMAP.md): WebSocket vitals ingest validated against [@maekbeat/protocol](../../packages/protocol), a bounded per-device ring buffer, a sliding-window alert engine, REST reads, and the WebSocket fan-out that feeds [apps/web](../web) — all in the OpenAPI document.
 
 ## Run it
 
@@ -19,6 +19,8 @@ pnpm --filter @maekbeat/server typecheck
 One JSON-encoded vitals frame per message, validated with `vitalsFrameSchema`; there is no batching. Every message gets a JSON reply from [src/ingest.ts](src/ingest.ts): `{type: "ack", deviceId, seq, sessionEpoch, receivedAtMs, newSession}` on accept, or `{type: "rejected", reason: "invalid_json" | "invalid_frame" | "duplicate", ...}` on drop. A reject never closes the socket — one bad frame must not sever a stream carrying good ones.
 
 Declared limits, honestly: max message size is 16 KiB (`INGEST_MAX_PAYLOAD_BYTES`) — the one transport-level exception, closing the connection with code 1009 — and plain HTTP requests to `/ingest` get 426. Ingest is unauthenticated and the device map grows with every distinct `deviceId`, so `RING_CAPACITY` bounds memory per device, not per process. No throughput numbers are claimed anywhere; those arrive with the C19 k6 profile.
+
+Browser reads are cross-origin in every setup this repo documents, since the dashboard runs on another port, so the API sends CORS headers — permissively by default because it is unauthenticated and holds only synthetic data, and `CORS_ORIGIN` narrows that to an allowlist. That was missing until C12 and no suite caught it, because every test used a mocked fetch and none crossed an origin. Capturing the demo GIF through a real browser did.
 
 `receivedAtMs` is stamped from the server clock at ingest and stored beside each frame. That lands the clock-drift policy of [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md): the `receivedAtMs − capturedAtMs` delta is the drift signal, and C7 alert windows will evaluate on server receive time.
 
@@ -50,6 +52,14 @@ On subscribe the socket sends `{type:"ready", deviceId, serverTimeMs, ringCapaci
 
 Subscribing to a device the server has never seen is allowed and stays silent until its first frame — a monitor that had to wait for data before attaching would miss the data it was waiting for. A subscriber whose socket dies mid-send is dropped without disturbing ingest for that device, and the close handler unsubscribes it. `ringCapacity` is sent so a client knows the largest window a reconnect could recover; anything evicted past it is gone, and [apps/web](../web) renders that as a gap rather than a join.
 
+## Acknowledgement — `POST /devices/:deviceId/alerts/:alertId/decisions` (since C12)
+
+Appends a decision to the device's log ([src/acks.ts](src/acks.ts)) and returns the appended event. The log is append-only by construction — the class has no update and no delete — so a change of mind appends a second event and the decision in force is the newest one for that alert. Who judged what, and when, survives it, which is the shape [docs/ROADMAP.md](../../docs/ROADMAP.md) C22 needs for the audit log.
+
+`acknowledged` means seen and acted on; `dismissed` means seen and judged not actionable. Counting the second against the first is the false-alarm signal the C23 product loop asks for, and both appear in the counters on `GET /devices/:deviceId/alerts` alongside the log itself. A decision on an alert this engine never raised is refused with 404 rather than recorded, because a fiction in an audit log is worse than a missing row.
+
+`actor` is asserted by the caller and authenticated by nothing — this server has no identity model at all (see "Declared limits" above). It is provenance, and C22 owns making it a claim worth trusting. Each appended decision is also published to every dashboard watching that device.
+
 ## Store and REST reads
 
 The store ([src/store.ts](src/store.ts)) keeps at most `RING_CAPACITY` frames per device in arrival order, evicting the oldest arrival first; retransmits of evicted frames still dedupe while their `seq` stays inside the reorder window. Reads sort by `(capturedAtMs, seq)` at query time, so out-of-order arrivals sit in the buffer as they came and leave in capture order.
@@ -57,6 +67,7 @@ The store ([src/store.ts](src/store.ts)) keeps at most `RING_CAPACITY` frames pe
 - `GET /devices` — device summaries (`sessionEpoch`, `frameCount`, `lastSeq`, `lastReceivedAtMs` as the staleness signal, `duplicatesDropped`) plus process-lifetime ingest counters.
 - `GET /devices/:deviceId/frames?since&limit` — frames from the window; `since` is an inclusive `capturedAtMs` bound, `limit` defaults to 100 (max 1000). Unknown device: 404.
 - `GET /devices/:deviceId/alerts` — alert lifecycle records + counters (see [src/reads.ts](src/reads.ts)); the alert shape mirrors `alertEventSchema` from [@maekbeat/protocol](../../packages/protocol), pinned by a drift test.
+- `POST /devices/:deviceId/alerts/:alertId/decisions` — append an acknowledgement or a dismissal (see [src/acks.ts](src/acks.ts)).
 - `GET /devices/:deviceId/stream` — the WebSocket fan-out above (see [src/stream.ts](src/stream.ts)).
 - `GET /healthz` — status, uptime, version. Swagger UI at `/docs` when `NODE_ENV=development`; [src/openapi.test.ts](src/openapi.test.ts) pins the exact route list.
 
@@ -64,21 +75,22 @@ The store ([src/store.ts](src/store.ts)) keeps at most `RING_CAPACITY` frames pe
 
 One row per test file, mapping it to the behaviors it pins — the file-to-behavior half of the C20 traceability story, wired before requirement IDs exist. Property suites run on fixed seeds with fixed iteration counts, so CI is deterministic; the review attacks from C6 and C7 live on here as regression tests, not as one-off session artifacts.
 
-| File                                                       | Pins                                                                                                                       |
-| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| [src/config.test.ts](src/config.test.ts)                   | env defaults and overrides; invalid values rejected with the variable named                                                |
-| [src/app.test.ts](src/app.test.ts)                         | /healthz body and version; central error handler masks 5xx outside development, passes 4xx through                         |
-| [src/store.test.ts](src/store.test.ts)                     | dedupe identity, reorder-window edges, reboot epochs, eviction, read ordering                                              |
-| [src/store.property.test.ts](src/store.property.test.ts)   | seeded seq-pattern attacks vs a docs/DECISIONS.md #11 oracle — 5 seeds × 400 rounds × 2 devices × 2 capacities             |
-| [src/alerts.test.ts](src/alerts.test.ts)                   | lifecycle, hysteresis, cooldown latch, monotonic window clock, golden transition ticks, 10-seed silence sweep              |
-| [src/alerts.property.test.ts](src/alerts.property.test.ts) | clock-regression fuzz (10 seeds × 400 frames): alternation, timestamp order, monotonicized-clock equivalence; frozen clock |
-| [src/ingest.test.ts](src/ingest.test.ts)                   | per-message WS replies, reject-never-closes, dedupe-before-engine seam, HTTP 426, close 1009                               |
-| [src/failures.test.ts](src/failures.test.ts)               | mid-stream drop then reconnect (same epoch resumes), malformed burst continuation, post-1009 state intact                  |
-| [src/isolation.test.ts](src/isolation.test.ts)             | parallel sockets with interleaved devices: no window, session, or counter bleed across devices                             |
-| [src/journey.test.ts](src/journey.test.ts)                 | vitals-sim → WS client → ingest → engine → REST anomaly journey, DEFAULT_ALERT_RULES unscaled                              |
-| [src/reads.test.ts](src/reads.test.ts)                     | REST read ordering, since/limit, 404 shape, wire-contract drift guards                                                     |
-| [src/stream.test.ts](src/stream.test.ts)                   | fan-out isolation per device, unsubscribe on close, a broken subscriber not breaking ingest, frame-before-its-alert order  |
-| [src/openapi.test.ts](src/openapi.test.ts)                 | exact route surface in the OpenAPI document, Swagger UI mounted in development only                                        |
+| File                                                       | Pins                                                                                                                         |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| [src/config.test.ts](src/config.test.ts)                   | env defaults and overrides; invalid values rejected with the variable named                                                  |
+| [src/app.test.ts](src/app.test.ts)                         | /healthz body and version; central error handler masks 5xx outside development, passes 4xx through                           |
+| [src/store.test.ts](src/store.test.ts)                     | dedupe identity, reorder-window edges, reboot epochs, eviction, read ordering                                                |
+| [src/store.property.test.ts](src/store.property.test.ts)   | seeded seq-pattern attacks vs a docs/DECISIONS.md #11 oracle — 5 seeds × 400 rounds × 2 devices × 2 capacities               |
+| [src/alerts.test.ts](src/alerts.test.ts)                   | lifecycle, hysteresis, cooldown latch, monotonic window clock, golden transition ticks, 10-seed silence sweep                |
+| [src/alerts.property.test.ts](src/alerts.property.test.ts) | clock-regression fuzz (10 seeds × 400 frames): alternation, timestamp order, monotonicized-clock equivalence; frozen clock   |
+| [src/ingest.test.ts](src/ingest.test.ts)                   | per-message WS replies, reject-never-closes, dedupe-before-engine seam, HTTP 426, close 1009                                 |
+| [src/failures.test.ts](src/failures.test.ts)               | mid-stream drop then reconnect (same epoch resumes), malformed burst continuation, post-1009 state intact                    |
+| [src/isolation.test.ts](src/isolation.test.ts)             | parallel sockets with interleaved devices: no window, session, or counter bleed across devices                               |
+| [src/journey.test.ts](src/journey.test.ts)                 | vitals-sim → WS client → ingest → engine → REST anomaly journey, DEFAULT_ALERT_RULES unscaled                                |
+| [src/reads.test.ts](src/reads.test.ts)                     | REST read ordering, since/limit, 404 shape, wire-contract drift guards                                                       |
+| [src/stream.test.ts](src/stream.test.ts)                   | fan-out isolation per device, unsubscribe on close, a broken subscriber not breaking ingest, frame-before-its-alert order    |
+| [src/acks.test.ts](src/acks.test.ts)                       | append-only log, decisions in force, retention by eviction, the decision route, its 404 and 400 paths, fan-out of a decision |
+| [src/openapi.test.ts](src/openapi.test.ts)                 | exact route surface in the OpenAPI document, Swagger UI mounted in development only                                          |
 
 Coverage is measured with `pnpm --filter @maekbeat/server test:coverage` ([vitest.config.ts](vitest.config.ts), v8 provider, all of src/ minus tests in the denominator — including the uncovered process entry [src/main.ts](src/main.ts); the one file outside the gate is the demo wiring, [scripts/demo.ts](scripts/demo.ts)). Since C9 the config carries thresholds set just under the measured floor, and the CI tests job runs the coverage-enabled suite, so a regression fails the build. Thresholds are a ratchet — they move only up, never down, never via new exclusions or narrowed globs (policy: [CLAUDE.md](../../CLAUDE.md)).
 
@@ -93,6 +105,7 @@ The gate and the reporting are separate things, and C10 separated them in CI ([.
 | `LOG_LEVEL`     | `info`        | `fatal` `error` `warn` `info` `debug` `trace` `silent` |
 | `NODE_ENV`      | `development` | `development` `test` `production`                      |
 | `RING_CAPACITY` | `1024`        | frames kept per device, 1–65536                        |
+| `CORS_ORIGIN`   | `*`           | browser origins allowed to read: `*` or a comma list   |
 
 Configuration is read from `process.env` only ([src/config.ts](src/config.ts)); [.env.example](.env.example) documents each variable and holds no secrets. To use a file, copy it to `.env` and pass `--env-file=.env` to Node, or export the variables in the shell.
 

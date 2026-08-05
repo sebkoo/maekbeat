@@ -29,10 +29,12 @@ Pre-ship checklist. Run every step; fix findings before committing.
    grep -riEn "FDA[- ](ready|compliant)" --exclude-dir=.git --exclude-dir=.claude --exclude-dir=node_modules --exclude=CLAUDE.md .
    ```
 
-5. README badge count — 6 today (coverage joined at C9), hard cap 7:
+5. README badge count — 6 today (coverage joined at C9), hard cap 7.
+   Counts badge images only: since C12 the README also embeds the demo GIF,
+   which is content, not a badge.
 
    ```sh
-   grep -o '!\[' README.md | wc -l
+   grep -oE '!\[[^]]*\]\((https://img\.shields\.io|https://github\.com/[^)]*badge\.svg|https://codecov\.io)[^)]*\)' README.md | wc -l
    ```
 
 6. README progress board updated in the same commit as any scope change.

@@ -28,10 +28,19 @@ Downshifting is safe here because the gates are model-independent. `.githooks/co
 
 - Plan → act → verify, in that order, for every commit.
 - Tests should expose intended behavior before implementation where practical.
+- Every new test is proven against a mutation of the thing it guards, at the time it is written (amended 2026-08-05 — see below).
 - Tests evolve with product requirements and are never weakened to make a failing implementation pass.
 - Every scope-changing commit updates the README progress board in the same commit.
 - A silent review pass precedes every commit.
 - An adversarial review pass closes every phase.
+
+### Amendment, 2026-08-05: prove the test, not just the code
+
+Three tests that asserted nothing reached the C10 and C11 adversarial passes before anything caught them: a chart test whose trough assertion read a y-axis computed from undecimated data the code under test never touched, a gap test whose inner loop ran zero iterations because both fixtures were flat, and an abort test whose post-unmount assertion held whether or not the guard existed. All three were repaired inside their own commits, so `main` never carried them — but each survived writing, self-review, and a full gate run, which is three chances too many.
+
+From C12 the proof moves to writing time: break the thing the test guards, watch that test fail, restore, keep. The record of what was broken and what happened lives in [docs/ai/mutation-log.md](mutation-log.md), one row per proof.
+
+That discipline is not sufficient on its own, and C12 is the evidence. Its own adversarial pass then broke four C12 tests that these writing-time proofs had passed — a live-region test that waited on an already-true condition, a keyboard test that supplied the click it was meant to be checking for, a dedupe test whose two assertions were byte-identical, and a 400-path test that never reached the validator it named. A mutation only proves what it mutates; the pass that follows exists to think of the mutations the author did not.
 
 ## No-trailer policy
 

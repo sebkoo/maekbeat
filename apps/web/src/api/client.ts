@@ -1,4 +1,9 @@
-import type { AlertEvent } from "@maekbeat/protocol";
+import {
+  alertDecisionEventSchema,
+  type AlertDecision,
+  type AlertDecisionEvent,
+  type AlertEvent,
+} from "@maekbeat/protocol";
 
 import {
   alertsPageSchema,
@@ -23,8 +28,9 @@ import {
 /*
  * Typed client for the apps/server route surface (apps/server/src/openapi.test.ts
  * pins the list): /healthz, /devices, /devices/:deviceId/frames,
- * /devices/:deviceId/alerts over HTTP, and /ingest over WebSocket — the fifth
- * route, whose URL is derived here while the socket itself belongs to C11.
+ * /devices/:deviceId/alerts and the decisions route over HTTP,
+ * /devices/:deviceId/stream over WebSocket, and /ingest, whose URL is derived
+ * here for the C14 gateway — the leg this app never sends on.
  *
  * Two members have no screen behind them yet and are kept deliberately, not by
  * accident: `health()` is the liveness read a connection banner will use, and
@@ -33,6 +39,13 @@ import {
  */
 
 export const DEFAULT_API_BASE_URL = "http://127.0.0.1:3000";
+
+/**
+ * What this surface calls itself when it records a decision. There is no
+ * authentication anywhere in this system, so it is provenance, not identity —
+ * C22 owns making it a claim worth trusting (apps/server/README.md).
+ */
+export const DASHBOARD_ACTOR = "web-dashboard";
 
 export interface FramesQuery {
   /** Inclusive lower bound on capturedAtMs. */
@@ -45,6 +58,8 @@ export interface FramesQuery {
 export interface DeviceStreamHandlers {
   onFrame: (frame: StoredFrame) => void;
   onAlert: (alert: AlertEvent) => void;
+  /** Another dashboard recorded a decision on this device (C12). */
+  onDecision: (decision: AlertDecisionEvent) => void;
   onState: (state: ConnectionState) => void;
   /** A re-open: the caller back-fills the missed window over REST. */
   onReconnect: () => void;
@@ -53,6 +68,16 @@ export interface DeviceStreamHandlers {
 
 export interface MaekbeatApi {
   readonly baseUrl: string;
+  /**
+   * Records a decision on one alert and returns the appended event (C12).
+   * Server-side state on purpose: a metric that dies on reload is not a metric.
+   */
+  recordDecision(
+    deviceId: string,
+    alertId: string,
+    decision: AlertDecision,
+    signal?: AbortSignal,
+  ): Promise<AlertDecisionEvent>;
   health(signal?: AbortSignal): Promise<Health>;
   listDevices(signal?: AbortSignal): Promise<DeviceList>;
   readFrames(deviceId: string, query?: FramesQuery, signal?: AbortSignal): Promise<FramesPage>;
@@ -115,6 +140,13 @@ export function createApiClient(options: ApiClientOptions = {}): MaekbeatApi {
       ),
     readAlerts: (deviceId, signal) =>
       http.getJson(`/devices/${encodeURIComponent(deviceId)}/alerts`, alertsPageSchema, signal),
+    recordDecision: (deviceId, alertId, decision, signal) =>
+      http.postJson(
+        `/devices/${encodeURIComponent(deviceId)}/alerts/${encodeURIComponent(alertId)}/decisions`,
+        { decision, actor: DASHBOARD_ACTOR },
+        alertDecisionEventSchema,
+        signal,
+      ),
     subscribe: (deviceId, handlers) =>
       openStream(
         streamUrl(http.baseUrl, deviceId),
@@ -124,6 +156,7 @@ export function createApiClient(options: ApiClientOptions = {}): MaekbeatApi {
             // window is what it can back-fill, so nothing to do with it here.
             if (message.type === "frame") handlers.onFrame(message.frame);
             else if (message.type === "alert") handlers.onAlert(message.alert);
+            else if (message.type === "decision") handlers.onDecision(message.decision);
           },
           onState: handlers.onState,
           onReconnect: handlers.onReconnect,

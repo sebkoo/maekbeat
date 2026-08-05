@@ -84,6 +84,19 @@ types the server-to-dashboard direction, which `/ingest` does not cover.
   unknown `type` is rejected, so a receiver never renders a message it does not
   understand.
 
+## Acknowledgement (since C12)
+
+`alertDecisionEventSchema` and `alertDecisionRequestSchema` (src/acks.ts) are the
+third additive exercise: new schemas, vitals frame untouched, `v` stays `1`. A
+decision is an appended event — `eventId`, `alertId`, `decision`, `actor`,
+`recordedAtMs` — never a mutable field on the alert, so the current decision is
+derived with `latestDecisions()` and the history survives a change of mind.
+
+The two decisions are `acknowledged` (seen, acted on) and `dismissed` (seen,
+judged not actionable); that distinction is the false-alarm signal the C23
+product loop counts. `actor` is caller-asserted provenance, not an
+authenticated identity — nothing in this system authenticates anything yet.
+
 ## Commands
 
 ```sh

@@ -1,4 +1,8 @@
-import { alertEventSchema, storedVitalsFrameSchema } from "@maekbeat/protocol";
+import {
+  alertDecisionEventSchema,
+  alertEventSchema,
+  storedVitalsFrameSchema,
+} from "@maekbeat/protocol";
 import { z } from "zod";
 
 /*
@@ -66,7 +70,11 @@ export const alertsPageSchema = z.object({
     raised: z.int(),
     resolved: z.int(),
     suppressed: z.int(),
+    acknowledged: z.int(),
+    dismissed: z.int(),
   }),
   alerts: z.array(alertEventSchema),
+  /** The append-only decision log for this device, oldest first (C12). */
+  decisions: z.array(alertDecisionEventSchema),
 });
 export type AlertsPage = z.infer<typeof alertsPageSchema>;

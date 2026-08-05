@@ -12,6 +12,15 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   /** Max frames retained per device in the ring buffer (oldest arrival evicted). */
   RING_CAPACITY: z.coerce.number().int().min(1).max(65536).default(1024),
+  /**
+   * Browser origins allowed to read this API: `*`, or a comma-separated
+   * allowlist. The dashboard is served from a different origin than the API in
+   * every setup this repo documents — vite on :5173, the server on :3000 — so
+   * without this the browser blocks every read. The default is permissive
+   * because the server is unauthenticated and holds only synthetic data
+   * (README, "Declared limits"); a deployment with real origins sets the list.
+   */
+  CORS_ORIGIN: z.string().trim().min(1).default("*"),
 });
 
 export type ServerConfig = z.infer<typeof envSchema>;

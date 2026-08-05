@@ -1,0 +1,1 @@
+32 frames sampled every 500 ms of wall time and played at 10 fps (3.2 s); playback is 5x the capture; the simulator replays device time at 10x; measured over this run: 140 s of simulated device time in 3.2 s of GIF, about 44x

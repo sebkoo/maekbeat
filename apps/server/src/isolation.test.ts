@@ -87,12 +87,15 @@ describe("multi-device isolation over parallel sockets", () => {
       raised: 1,
       resolved: 1,
       suppressed: 0,
+      acknowledged: 0,
+      dismissed: 0,
     });
     const restAlerts = await app.inject({ method: "GET", url: `/devices/${REST_ID}/alerts` });
     expect(restAlerts.json()).toEqual({
       deviceId: REST_ID,
-      counters: { raised: 0, resolved: 0, suppressed: 0 },
+      counters: { raised: 0, resolved: 0, suppressed: 0, acknowledged: 0, dismissed: 0 },
       alerts: [],
+      decisions: [],
     });
 
     // Frame stores never mixed: correct counts, correct owner on every frame.

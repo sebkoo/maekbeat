@@ -5,6 +5,8 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
+import type { AlertDecisionEvent } from "@maekbeat/protocol";
+
 import { App } from "./App";
 import type { DeviceStreamHandlers, MaekbeatApi } from "./api/client";
 import { ApiError } from "./api/http";
@@ -72,7 +74,8 @@ const windowStats = {
 
 const ALERTS = {
   deviceId: "sim-dev-1",
-  counters: { raised: 2, resolved: 1, suppressed: 0 },
+  counters: { raised: 2, resolved: 1, suppressed: 0, acknowledged: 0, dismissed: 0 },
+  decisions: [] as AlertDecisionEvent[],
   alerts: [
     {
       alertId: "sim-dev-1:spo2-low:1",
@@ -117,6 +120,14 @@ function fakeApi(overrides: Partial<MaekbeatApi> = {}): MaekbeatApi {
     listDevices: async () => DEVICE_LIST,
     readFrames: async () => FRAMES,
     readAlerts: async () => ALERTS,
+    recordDecision: async (deviceId, alertId, decision) => ({
+      eventId: `${deviceId}:decision:1`,
+      alertId,
+      deviceId,
+      decision,
+      actor: "web-dashboard",
+      recordedAtMs: 1_754_000_200_000,
+    }),
     subscribe: (_deviceId, handlers) => {
       streamHandlers = handlers;
       openSockets += 1;
@@ -284,13 +295,14 @@ describe("device detail", () => {
     screen.getByText(/clock delta \+500 ms/);
     screen.getByText(/Captured 2025-07-31 22:13:32Z/);
 
+    // Newest episode first: a caregiver reads the top of the timeline.
     const badges = [...document.querySelectorAll(".mb-alert-badge")];
     expect(badges.map((node) => node.getAttribute("data-alert-state"))).toEqual([
-      "resolved",
-      "ongoing",
       "raised",
+      "ongoing",
+      "resolved",
     ]);
-    expect(badges.map((node) => node.textContent)).toEqual(["resolved", "ongoing", "raised"]);
+    expect(badges.map((node) => node.textContent)).toEqual(["raised", "ongoing", "resolved"]);
 
     // Small multiples, not a dual axis: one chart per metric, same time axis.
     const charts = screen.getAllByRole("img").map((node) => node.getAttribute("aria-label"));
@@ -333,6 +345,42 @@ describe("device detail", () => {
     expect(badge?.textContent).toBe("disconnected");
     // The word is the cue; the palette repeats it, never replaces it.
     expect(badge?.getAttribute("data-alert-state")).toBe("raised");
+  });
+
+  // Alarm fatigue is the design constraint (C21): a 30-tick anomaly must read
+  // as one episode with a duration, not as thirty entries in a list.
+  it("shows a whole alert lifecycle as one timeline row", async () => {
+    renderApp(
+      fakeApi({
+        readAlerts: async () => ({ ...ALERTS, alerts: [], decisions: [] }),
+      }),
+      "/devices/sim-dev-1",
+    );
+    await screen.findByRole("heading", { level: 1, name: "sim-dev-1" });
+
+    const episode = {
+      alertId: "sim-dev-1:spo2-low:7",
+      deviceId: "sim-dev-1",
+      metric: "spo2Pct" as const,
+      direction: "low" as const,
+      raisedAtMs: 1_754_000_010_000,
+      windowStats,
+    };
+    // The same episode arriving three times, as the engine reports it.
+    act(() => streamHandlers?.onAlert({ ...episode, state: "raised" }));
+    act(() => streamHandlers?.onAlert({ ...episode, state: "ongoing" }));
+    act(() =>
+      streamHandlers?.onAlert({
+        ...episode,
+        state: "resolved",
+        resolvedAtMs: episode.raisedAtMs + 53_000,
+      }),
+    );
+
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(1));
+    const row = screen.getAllByRole("listitem")[0]!;
+    expect(row.getAttribute("data-alert-state")).toBe("resolved");
+    expect(row.textContent).toContain("53s");
   });
 
   it("admits to dropping messages the contract rejected", async () => {
@@ -385,8 +433,9 @@ describe("device detail", () => {
       fakeApi({
         readAlerts: async () => ({
           deviceId: "sim-dev-1",
-          counters: { raised: 0, resolved: 0, suppressed: 0 },
+          counters: { raised: 0, resolved: 0, suppressed: 0, acknowledged: 0, dismissed: 0 },
           alerts: [],
+          decisions: [],
         }),
       }),
       "/devices/sim-dev-1",
@@ -476,6 +525,44 @@ describe("styles are applied, not merely defined", () => {
     const gapped = { ...FRAMES, count: gappedFrames.length, frames: gappedFrames };
     renderApp(fakeApi({ readFrames: async () => gapped }), "/devices/sim-dev-1");
     await screen.findByRole("heading", { level: 1, name: "sim-dev-1" });
+    collect();
+    cleanup();
+
+    // A decision already in force, so the recorded line is among the classes.
+    renderApp(
+      fakeApi({
+        readAlerts: async () => ({
+          ...ALERTS,
+          decisions: [
+            {
+              eventId: "sim-dev-1:decision:1",
+              alertId: ALERTS.alerts[0]!.alertId,
+              deviceId: "sim-dev-1",
+              decision: "acknowledged" as const,
+              actor: "web-dashboard",
+              recordedAtMs: 1_754_000_200_000,
+            },
+          ],
+        }),
+      }),
+      "/devices/sim-dev-1",
+    );
+    await screen.findByText(/Acknowledged by web-dashboard/);
+    collect();
+    cleanup();
+
+    // And a decision the server refused, so the failure line is covered too.
+    renderApp(
+      fakeApi({
+        recordDecision: async () => {
+          throw new ApiError("http", "unknown alert: ghost on sim-dev-1", { status: 404 });
+        },
+      }),
+      "/devices/sim-dev-1",
+    );
+    const ackButton = await screen.findAllByRole("button", { name: /Acknowledge/ });
+    fireEvent.click(ackButton[0]!);
+    await screen.findByText(/Not recorded:/);
     collect();
 
     await waitFor(() => {

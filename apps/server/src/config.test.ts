@@ -10,6 +10,7 @@ describe("loadConfig", () => {
       PORT: 3000,
       LOG_LEVEL: "info",
       RING_CAPACITY: 1024,
+      CORS_ORIGIN: "*",
     });
   });
 
@@ -21,6 +22,7 @@ describe("loadConfig", () => {
         PORT: "8080",
         LOG_LEVEL: "debug",
         RING_CAPACITY: "512",
+        CORS_ORIGIN: "https://dash.example",
       }),
     ).toEqual({
       NODE_ENV: "production",
@@ -28,6 +30,7 @@ describe("loadConfig", () => {
       PORT: 8080,
       LOG_LEVEL: "debug",
       RING_CAPACITY: 512,
+      CORS_ORIGIN: "https://dash.example",
     });
   });
 

@@ -104,7 +104,13 @@ describe("socket drop and reconnect", () => {
     // reconnect (seq 152): one lifecycle across two sockets.
     const alerts = await app?.inject({ method: "GET", url: `/devices/${DEVICE_ID}/alerts` });
     const body = alerts?.json<{ counters: unknown; alerts: { state: string }[] }>();
-    expect(body?.counters).toEqual({ raised: 1, resolved: 1, suppressed: 0 });
+    expect(body?.counters).toEqual({
+      raised: 1,
+      resolved: 1,
+      suppressed: 0,
+      acknowledged: 0,
+      dismissed: 0,
+    });
     expect(body?.alerts[0]?.state).toBe("resolved");
 
     const devices = await app?.inject({ method: "GET", url: "/devices" });

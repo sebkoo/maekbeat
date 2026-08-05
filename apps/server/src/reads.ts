@@ -1,13 +1,21 @@
 import type { FastifyPluginAsync } from "fastify";
 
+import type { AlertDecision } from "@maekbeat/protocol";
+
+import type { DecisionLog } from "./acks";
 import type { AlertEngine } from "./alerts";
 import type { IngestCounters } from "./ingest";
 import type { VitalsStore } from "./store";
+import type { DeviceBroadcaster } from "./stream";
 
 export interface ReadsPluginOptions {
   store: VitalsStore;
   engine: AlertEngine;
   counters: IngestCounters;
+  /** Append-only decision log behind the acknowledgement route (C12). */
+  decisions: DecisionLog;
+  /** Fan-out, so one caregiver's decision reaches every open dashboard. */
+  broadcaster?: DeviceBroadcaster;
 }
 
 // Response schemas are hand-written JSON Schema mirroring the zod wire contract
@@ -74,6 +82,23 @@ const alertEventJsonSchema = {
   },
 } as const;
 
+// Mirrors @maekbeat/protocol alertDecisionEventSchema; the drift test in
+// reads.test.ts pins the field sets against each other.
+const decisionEventJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["eventId", "alertId", "deviceId", "decision", "actor", "recordedAtMs"],
+  properties: {
+    eventId: { type: "string" },
+    alertId: { type: "string" },
+    deviceId: { type: "string" },
+    decision: { type: "string", enum: ["acknowledged", "dismissed"] },
+    actor: { type: "string", description: "asserted by the caller; unauthenticated (C22)" },
+    recordedAtMs: { type: "integer", description: "server clock at append" },
+    note: { type: "string" },
+  },
+} as const;
+
 const notFoundJsonSchema = {
   type: "object",
   additionalProperties: false,
@@ -86,7 +111,7 @@ const notFoundJsonSchema = {
 
 /** REST reads over the ring buffer: device listing + per-device frames. */
 export const readsPlugin: FastifyPluginAsync<ReadsPluginOptions> = async (app, opts) => {
-  const { store, engine, counters } = opts;
+  const { store, engine, counters, decisions, broadcaster } = opts;
 
   app.get(
     "/devices",
@@ -224,8 +249,9 @@ export const readsPlugin: FastifyPluginAsync<ReadsPluginOptions> = async (app, o
         description:
           "Alert lifecycle records from the sliding-window engine " +
           "(apps/server/src/alerts.ts), oldest first, capped at 100 per device. " +
-          "Counters are process-lifetime per device — raised/resolved/suppressed " +
-          "are the C23 product-loop metrics. Thresholds are demo heuristics for a " +
+          "raised/resolved/suppressed are process-lifetime counts per device; " +
+          "acknowledged/dismissed are the decisions in force over the retained " +
+          "decision log, so they can fall as well as rise. Thresholds are demo heuristics for a " +
           "notification demo of the kind used in monitoring research, not " +
           "clinical rules.",
         params: {
@@ -238,20 +264,23 @@ export const readsPlugin: FastifyPluginAsync<ReadsPluginOptions> = async (app, o
           200: {
             type: "object",
             additionalProperties: false,
-            required: ["deviceId", "counters", "alerts"],
+            required: ["deviceId", "counters", "alerts", "decisions"],
             properties: {
               deviceId: { type: "string" },
               counters: {
                 type: "object",
                 additionalProperties: false,
-                required: ["raised", "resolved", "suppressed"],
+                required: ["raised", "resolved", "suppressed", "acknowledged", "dismissed"],
                 properties: {
                   raised: { type: "integer" },
                   resolved: { type: "integer" },
                   suppressed: { type: "integer" },
+                  acknowledged: { type: "integer" },
+                  dismissed: { type: "integer" },
                 },
               },
               alerts: { type: "array", items: alertEventJsonSchema },
+              decisions: { type: "array", items: decisionEventJsonSchema },
             },
           },
           404: notFoundJsonSchema,
@@ -267,9 +296,85 @@ export const readsPlugin: FastifyPluginAsync<ReadsPluginOptions> = async (app, o
       }
       return {
         deviceId,
-        counters: engine.countersFor(deviceId),
+        counters: { ...engine.countersFor(deviceId), ...decisions.countsFor(deviceId) },
         alerts: engine.listAlerts(deviceId),
+        decisions: decisions.list(deviceId),
       };
+    },
+  );
+
+  app.post<{
+    Params: { deviceId: string; alertId: string };
+    Body: unknown;
+  }>(
+    "/devices/:deviceId/alerts/:alertId/decisions",
+    {
+      schema: {
+        summary: "Record a decision on one alert",
+        description:
+          "Body shape and the two decisions come from @maekbeat/protocol " +
+          "alertDecisionRequestSchema, mirrored here as JSON Schema so the " +
+          "OpenAPI document and the validator are one thing; a drift test in " +
+          "reads.test.ts pins the field sets against each other. " +
+          "Appends an acknowledgement or a dismissal to the device's decision " +
+          "log (apps/server/src/acks.ts) and returns the appended event. The " +
+          "log is append-only: recording a second decision on the same alert " +
+          "appends a second event and the newest one is the decision in force, " +
+          "so who judged what, and when, survives a change of mind. " +
+          "`acknowledged` means seen and acted on, `dismissed` means seen and " +
+          "judged not actionable — the difference is the false-alarm signal the " +
+          "C23 product loop counts. `actor` is asserted by the caller and is " +
+          "not authenticated (C22 owns that). An alert evicted past the " +
+          "100-record history limit can no longer be decided on: 404.",
+        params: {
+          type: "object",
+          additionalProperties: false,
+          required: ["deviceId", "alertId"],
+          properties: {
+            deviceId: { type: "string", minLength: 1, maxLength: 64 },
+            alertId: { type: "string", minLength: 1, maxLength: 128 },
+          },
+        },
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["decision", "actor"],
+          properties: {
+            decision: { type: "string", enum: ["acknowledged", "dismissed"] },
+            actor: { type: "string", minLength: 1, maxLength: 64 },
+            note: { type: "string", maxLength: 280 },
+          },
+        },
+        response: {
+          201: decisionEventJsonSchema,
+          400: notFoundJsonSchema,
+          404: notFoundJsonSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const { deviceId, alertId } = request.params;
+      const body = request.body as { decision: AlertDecision; actor: string; note?: string };
+
+      // A decision on an alert this engine cannot show is refused rather than
+      // recorded: either it never raised it, or the alert has aged out past
+      // ALERT_HISTORY_LIMIT. Recording either would put a fiction in the log.
+      if (!engine.listAlerts(deviceId).some((alert) => alert.alertId === alertId)) {
+        return reply
+          .status(404)
+          .send({ statusCode: 404, message: `unknown alert: ${alertId} on ${deviceId}` });
+      }
+
+      const event = decisions.append({
+        deviceId,
+        alertId,
+        decision: body.decision,
+        actor: body.actor,
+        ...(body.note === undefined ? {} : { note: body.note }),
+        recordedAtMs: Date.now(),
+      });
+      broadcaster?.publishDecision(event);
+      return reply.status(201).send(event);
     },
   );
 };

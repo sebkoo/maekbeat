@@ -1,4 +1,9 @@
-import type { AlertEvent, StoredVitalsFrame, StreamMessage } from "@maekbeat/protocol";
+import type {
+  AlertDecisionEvent,
+  AlertEvent,
+  StoredVitalsFrame,
+  StreamMessage,
+} from "@maekbeat/protocol";
 import type { FastifyPluginAsync } from "fastify";
 
 /**
@@ -37,6 +42,11 @@ export class DeviceBroadcaster {
 
   publishAlert(alert: AlertEvent): void {
     this.publish(alert.deviceId, { type: "alert", alert });
+  }
+
+  /** A decision recorded by one dashboard, sent to every other one (C12). */
+  publishDecision(decision: AlertDecisionEvent): void {
+    this.publish(decision.deviceId, { type: "decision", decision });
   }
 
   subscriberCount(deviceId?: string): number {

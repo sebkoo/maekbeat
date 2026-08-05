@@ -1,8 +1,10 @@
+import fastifyCors from "@fastify/cors";
 import fastifySwagger from "@fastify/swagger";
 import fastifySwaggerUi from "@fastify/swagger-ui";
 import fastifyWebsocket from "@fastify/websocket";
 import { fastify } from "fastify";
 
+import { DecisionLog } from "./acks";
 import { AlertEngine, DEFAULT_ALERT_RULES, type AlertRuleConfig } from "./alerts";
 import type { ServerConfig } from "./config";
 import { INGEST_MAX_PAYLOAD_BYTES, ingestPlugin, type IngestCounters } from "./ingest";
@@ -16,6 +18,7 @@ declare module "fastify" {
     vitalsStore: VitalsStore;
     alertEngine: AlertEngine;
     deviceBroadcaster: DeviceBroadcaster;
+    decisionLog: DecisionLog;
   }
 }
 
@@ -27,6 +30,10 @@ export interface BuildAppOptions {
 export async function buildApp(config: ServerConfig, options: BuildAppOptions = {}) {
   const app = fastify({
     logger: { level: config.LOG_LEVEL },
+    // An unknown key in a request body is a corrupted or forged payload, the
+    // same judgement @maekbeat/protocol's strict schemas make on the wire.
+    // Fastify strips them by default, which would let one through silently.
+    ajv: { customOptions: { removeAdditional: false } },
   });
 
   // Central handler for thrown errors: log the full error and never leak
@@ -45,15 +52,23 @@ export async function buildApp(config: ServerConfig, options: BuildAppOptions = 
     void reply.status(statusCode).send({ statusCode, message });
   });
 
+  // The dashboard is cross-origin in every documented setup, so the API says
+  // so explicitly rather than leaving the browser to block the read.
+  await app.register(fastifyCors, {
+    origin: config.CORS_ORIGIN === "*" ? true : config.CORS_ORIGIN.split(",").map((o) => o.trim()),
+    methods: ["GET", "POST", "OPTIONS"],
+  });
+
   await app.register(fastifySwagger, {
     openapi: {
       openapi: "3.1.0",
       info: {
         title: "Maekbeat server API",
         description:
-          "Vitals ingest, sliding-window alert lifecycle, reads, and dashboard " +
-          "fan-out: WebSocket /ingest, /devices listing, per-device frame and " +
-          "alert reads, WebSocket /devices/{deviceId}/stream, /healthz.",
+          "Vitals ingest, sliding-window alert lifecycle, reads, acknowledgement, " +
+          "and dashboard fan-out: WebSocket /ingest, /devices listing, per-device " +
+          "frame and alert reads, the append-only decision route, WebSocket " +
+          "/devices/{deviceId}/stream, /healthz.",
         version: packageVersion,
       },
     },
@@ -67,14 +82,16 @@ export async function buildApp(config: ServerConfig, options: BuildAppOptions = 
   const store = new VitalsStore(config.RING_CAPACITY);
   const engine = new AlertEngine(options.alertRules ?? DEFAULT_ALERT_RULES);
   const broadcaster = new DeviceBroadcaster();
+  const decisions = new DecisionLog();
   const counters: IngestCounters = { received: 0, rejectedInvalid: 0 };
   app.decorate("vitalsStore", store);
   app.decorate("alertEngine", engine);
   app.decorate("deviceBroadcaster", broadcaster);
+  app.decorate("decisionLog", decisions);
 
   await app.register(fastifyWebsocket, { options: { maxPayload: INGEST_MAX_PAYLOAD_BYTES } });
   await app.register(ingestPlugin, { store, engine, counters, broadcaster });
-  await app.register(readsPlugin, { store, engine, counters });
+  await app.register(readsPlugin, { store, engine, counters, decisions, broadcaster });
   await app.register(streamPlugin, { broadcaster, ringCapacity: config.RING_CAPACITY });
 
   app.get(

@@ -17,12 +17,10 @@ const TONE: Record<ConnectionState, { tone: "raised" | "ongoing" | "resolved"; l
 export function ConnectionBadge(props: { state: ConnectionState }) {
   const { tone, label } = TONE[props.state];
   return (
-    <span
-      className="mb-conn-badge"
-      data-alert-state={tone}
-      data-conn-state={props.state}
-      role="status"
-    >
+    // No role="status" here: this is the visual indicator, and a second live
+    // region would put two voices on one page. AlertAnnouncer announces the
+    // connection changing, along with everything else worth interrupting for.
+    <span className="mb-conn-badge" data-alert-state={tone} data-conn-state={props.state}>
       {label}
     </span>
   );

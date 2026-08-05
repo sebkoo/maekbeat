@@ -36,6 +36,15 @@ const ALERT = {
   windowStats: { windowMs: 15_000, sampleCount: 15, breachCount: 5, minValue: 86, maxValue: 94 },
 };
 
+const DECISION = {
+  eventId: "dev-1:decision:1",
+  alertId: "dev-1:spo2-low:1",
+  deviceId: "dev-1",
+  decision: "acknowledged",
+  actor: "web-dashboard",
+  recordedAtMs: 1_754_000_120_000,
+};
+
 function response(body: unknown, status = 200): Response {
   return {
     ok: status < 400,
@@ -120,14 +129,16 @@ describe("createApiClient — happy path", () => {
   it("reads alerts, counters included", async () => {
     const { calls, fetchImpl } = stubFetch({
       deviceId: "dev-1",
-      counters: { raised: 1, resolved: 1, suppressed: 0 },
+      counters: { raised: 1, resolved: 1, suppressed: 0, acknowledged: 1, dismissed: 0 },
       alerts: [ALERT],
+      decisions: [DECISION],
     });
     const api = createApiClient({ baseUrl: BASE, fetchImpl });
 
     const page = await api.readAlerts("dev-1");
     expect(page.alerts[0]?.state).toBe("resolved");
     expect(page.counters.raised).toBe(1);
+    expect(page.decisions).toEqual([DECISION]);
     expect(calls).toEqual([`${BASE}/devices/dev-1/alerts`]);
   });
 
@@ -283,6 +294,76 @@ describe("createApiClient — failure handling", () => {
   });
 });
 
+describe("recordDecision — the acknowledgement route (C12)", () => {
+  /** Captures the request init so the verb and body can be asserted. */
+  function stubPost(body: unknown, status = 201) {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchImpl: FetchLike = async (url, init) => {
+      calls.push({ url, ...(init ? { init } : {}) });
+      return response(body, status);
+    };
+    return { calls, fetchImpl };
+  }
+
+  it("posts the decision and the actor, and returns the appended event", async () => {
+    const { calls, fetchImpl } = stubPost(DECISION);
+    const api = createApiClient({ baseUrl: BASE, fetchImpl });
+
+    await expect(api.recordDecision("dev-1", "a/b", "acknowledged")).resolves.toEqual(DECISION);
+
+    expect(calls[0]?.url).toBe(`${BASE}/devices/dev-1/alerts/a%2Fb/decisions`);
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      decision: "acknowledged",
+      actor: "web-dashboard",
+    });
+    expect((calls[0]?.init?.headers as Record<string, string>)["content-type"]).toBe(
+      "application/json",
+    );
+  });
+
+  it("passes an abort signal through when one is given", async () => {
+    const { calls, fetchImpl } = stubPost(DECISION);
+    const api = createApiClient({ baseUrl: BASE, fetchImpl });
+    const controller = new AbortController();
+
+    await api.recordDecision("dev-1", "a1", "dismissed", controller.signal);
+
+    expect(calls[0]?.init?.signal).toBe(controller.signal);
+  });
+
+  it("posts without a signal when none is given, and reads a decision back", async () => {
+    const { calls, fetchImpl } = stubPost(DECISION);
+    const api = createApiClient({ baseUrl: BASE, fetchImpl });
+
+    await api.recordDecision("dev-1", "a1", "dismissed");
+
+    expect(calls[0]?.init?.signal).toBeUndefined();
+  });
+
+  it("reports the server's refusal rather than pretending it landed", async () => {
+    const { fetchImpl } = stubPost({ statusCode: 404, message: "unknown alert: ghost" }, 404);
+    const api = createApiClient({ baseUrl: BASE, fetchImpl });
+
+    const error = (await api
+      .recordDecision("dev-1", "ghost", "acknowledged")
+      .catch((cause: unknown) => cause)) as ApiError;
+    expect(error.kind).toBe("http");
+    expect(error.status).toBe(404);
+    expect(error.message).toBe("unknown alert: ghost");
+  });
+
+  it("rejects a response that is not a decision event", async () => {
+    const { fetchImpl } = stubPost({ ...DECISION, decision: "maybe" });
+    const api = createApiClient({ baseUrl: BASE, fetchImpl });
+
+    const error = (await api
+      .recordDecision("dev-1", "a1", "acknowledged")
+      .catch((cause: unknown) => cause)) as ApiError;
+    expect(error.kind).toBe("contract");
+  });
+});
+
 describe("subscribe — the streaming member (C11)", () => {
   /** A socket the test drives, injected exactly like fetchImpl. */
   function harness() {
@@ -290,6 +371,7 @@ describe("subscribe — the streaming member (C11)", () => {
     let url = "";
     const frames: unknown[] = [];
     const alerts: unknown[] = [];
+    const decisions: unknown[] = [];
     const states: string[] = [];
     const invalid: number[] = [];
     const closed = { count: 0 };
@@ -311,6 +393,7 @@ describe("subscribe — the streaming member (C11)", () => {
     const subscription = api.subscribe("dev-1", {
       onFrame: (frame) => frames.push(frame),
       onAlert: (alert) => alerts.push(alert),
+      onDecision: (decision) => decisions.push(decision),
       onState: (state) => states.push(state),
       onReconnect: () => {},
       onInvalidMessage: () => invalid.push(1),
@@ -322,6 +405,7 @@ describe("subscribe — the streaming member (C11)", () => {
       open: () => handlers?.onOpen(),
       frames,
       alerts,
+      decisions,
       states,
       invalid,
       closed,
@@ -342,9 +426,12 @@ describe("subscribe — the streaming member (C11)", () => {
     h.deliver({ type: "ready", deviceId: "dev-1", serverTimeMs: 1, ringCapacity: 1024 });
     h.deliver({ type: "frame", frame: FRAME });
     h.deliver({ type: "alert", alert: ALERT });
+    h.deliver({ type: "decision", decision: DECISION });
 
     expect(h.frames).toEqual([FRAME]);
     expect(h.alerts).toEqual([ALERT]);
+    // A decision another dashboard recorded reaches this one too (C12).
+    expect(h.decisions).toEqual([DECISION]);
     expect(h.states).toEqual(["connecting", "live"]);
   });
 
@@ -377,6 +464,7 @@ describe("subscribe — the streaming member (C11)", () => {
     api.subscribe("dev-1", {
       onFrame: () => {},
       onAlert: () => {},
+      onDecision: () => {},
       onState: () => {},
       onReconnect: () => {},
     });

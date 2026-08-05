@@ -21,19 +21,16 @@ export default mergeConfig(
         include: ["src/**/*.{ts,tsx}"],
         exclude: ["src/**/*.test.{ts,tsx}"],
         reporter: ["text", "lcov"],
-        // Ratchet, not aspiration (CLAUDE.md): raised at C11 against a measured
-        // 96.95% statements / 92.10% branches / 98.19% functions / 98.46% lines,
-        // with the untested browser entry main.tsx counted against it.
-        //
-        // Branches is the one that did not move: C10 measured 93.87% and C11
-        // measures 92.10%, because the live path adds branchier code than it
-        // adds covered branches. The threshold therefore stays at 91 — a
-        // threshold never follows a measurement downwards.
+        // Ratchet, not aspiration (CLAUDE.md): raised again at C12 against a
+        // measured 97.11% statements / 92.61% branches / 97.05% functions /
+        // 98.72% lines, with the untested browser entry main.tsx counted
+        // against it. Functions holds at 96 rather than following its C11
+        // measurement (98.19%) down — a threshold never moves with a dip.
         thresholds: {
-          statements: 95,
-          branches: 91,
+          statements: 96,
+          branches: 92,
           functions: 96,
-          lines: 96,
+          lines: 97,
         },
       },
     },

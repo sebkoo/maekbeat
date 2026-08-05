@@ -33,18 +33,20 @@ That diagram is the target architecture, not today's system — the Status board
 
 ## Design notes
 
-| Topic                                    | Where                                                                      | Status                 |
-| ---------------------------------------- | -------------------------------------------------------------------------- | ---------------------- |
-| BLE→cloud pipeline design                | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) scaling chain + failure modes | C4 ✅                  |
-| Alert validation without patient data    | synthetic scenarios + golden tests; apps/server tests                      | C3 ✅ · C8 ✅          |
-| Scaling model and load evidence          | target architecture + k6 results                                           | C4 ✅ · C19 (planned)  |
-| Alert states legible without colour      | [apps/web](apps/web) tokens + contract test (word · mark · border style)   | C10 ✅ · C12 (planned) |
-| Missing data drawn as missing            | chart gaps + min/max decimation, pinned in apps/web/src/chart              | C11 ✅                 |
-| Production monitoring                    | OpenTelemetry + dashboards-as-code                                         | C18 (planned)          |
-| Health-data security posture             | [SECURITY.md](SECURITY.md) (today) · docs/security/threat-model.md         | C22 (planned)          |
-| iOS background execution + BLE lifecycle | apps/ios BLE state machine + background notes                              | C15 (planned)          |
-| Tooling choices and trade-offs           | [docs/DECISIONS.md](docs/DECISIONS.md) (13 entries today)                  | C0 ✅                  |
-| Process auditability                     | ADRs in docs/adr · PR template + CI hygiene job in .github                 | C0 ✅                  |
+| Topic                                    | Where                                                                         | Status                 |
+| ---------------------------------------- | ----------------------------------------------------------------------------- | ---------------------- |
+| BLE→cloud pipeline design                | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) scaling chain + failure modes    | C4 ✅                  |
+| Alert validation without patient data    | synthetic scenarios + golden tests; apps/server tests                         | C3 ✅ · C8 ✅          |
+| Scaling model and load evidence          | target architecture + k6 results                                              | C4 ✅ · C19 (planned)  |
+| Alert states legible without colour      | tokens + contract test, rendered by apps/web/src/components/AlertTimeline.tsx | C10 ✅ · C12 ✅        |
+| Missing data drawn as missing            | chart gaps + min/max decimation, pinned in apps/web/src/chart                 | C11 ✅                 |
+| Alarm fatigue and acknowledgement        | episode timeline + append-only decision log (apps/server/src/acks.ts)         | C12 ✅ · C21 (planned) |
+| Accessibility of a live monitoring UI    | axe + keyboard + live-region scope, [apps/web](apps/web) a11y.test.tsx        | C12 ✅                 |
+| Production monitoring                    | OpenTelemetry + dashboards-as-code                                            | C18 (planned)          |
+| Health-data security posture             | [SECURITY.md](SECURITY.md) (today) · docs/security/threat-model.md            | C22 (planned)          |
+| iOS background execution + BLE lifecycle | apps/ios BLE state machine + background notes                                 | C15 (planned)          |
+| Tooling choices and trade-offs           | [docs/DECISIONS.md](docs/DECISIONS.md) (14 entries today)                     | C0 ✅                  |
+| Process auditability                     | ADRs in docs/adr · PR template + CI hygiene job in .github                    | C0 ✅                  |
 
 Engineers: start at [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · the why: [docs/DECISIONS.md](docs/DECISIONS.md) · the plan: [docs/ROADMAP.md](docs/ROADMAP.md).
 
@@ -56,11 +58,21 @@ git clone https://github.com/sebkoo/maekbeat.git && cd maekbeat && ./scripts/boo
 
 [scripts/bootstrap.sh](scripts/bootstrap.sh) verifies the toolchain and activates the .githooks. The pipeline is runnable since C6: `pnpm --filter @maekbeat/server demo` streams simulator frames over WebSocket into [apps/server](apps/server), raises and resolves a demo alert on the anomaly scenario (C7), pushes the same frames to a subscribed dashboard socket (C11), and reads it all back over REST.
 
+## Demo
+
+![The Maekbeat dashboard streaming synthetic vitals: an SpO2 desaturation raises an alert, which is then acknowledged](docs/demo/preview.gif)
+
+Captured from the running system by [apps/web/scripts/capture-demo.mjs](apps/web/scripts/capture-demo.mjs) — a real apps/server, a production build of the dashboard, real vitals-sim anomaly frames over a real WebSocket, and a real click on the acknowledgement control. Regenerate it with `pnpm --filter @maekbeat/web demo:gif`; it needs ffmpeg and Chrome, whose path defaults to the macOS location and is overridable with `CHROME_PATH`.
+
+Read no timing off it, and the numbers are measured rather than asserted — the script writes them to [docs/demo/preview.caption.txt](docs/demo/preview.caption.txt) at capture time. This recording is 32 frames sampled every 500 ms and played at 10 fps, so 3.2 seconds of GIF covers 140 seconds of simulated device time: about 44x, averaged over the whole clip.
+
+The clock delta on screen is part of the same artefact. The simulator replays one second of device time every 100 ms, so `receivedAtMs − capturedAtMs` falls by 900 ms per frame and ends deeply negative; it is the replay speed showing through, not a latency this system has. Real latency is C19's to measure.
+
 ## Repository tour
 
 ```text
-apps/        server (WS ingest · ring buffer · alert engine · REST reads · dashboard fan-out — C5–C11)
-             web (design tokens · typed client · live vitals chart over WebSocket — C10–C11) · ios — planned, C14–C17
+apps/        server (WS ingest · ring buffer · alert engine · REST reads · fan-out · decisions — C5–C12)
+             web (tokens · live chart · alert timeline · acknowledgement · WCAG 2.2 AA — C10–C12) · ios — planned, C14–C17
 packages/    protocol (shared vitals contract: types + zod schemas)
              vitals-sim (deterministic synthetic vitals: rest, motion, anomaly)
 infra/       AWS CDK stacks — planned, C19
@@ -77,7 +89,7 @@ scripts/     bootstrap + hygiene checks
 | 1 — Foundations          | toolchain, guardrails, docs harness — foundation commit — application code intentionally starts at C1; see [docs/ROADMAP.md](docs/ROADMAP.md) | ✅     | [C0](https://github.com/sebkoo/maekbeat/commits/main)                                                                                                                                                                                                                                                                             |
 | 2 — Contract & simulator | zod schemas, vitals-sim, golden tests, architecture doc                                                                                       | ✅     | [C1 protocol](https://github.com/sebkoo/maekbeat/commit/63be391) · [C2 vitals-sim](https://github.com/sebkoo/maekbeat/commit/01b9007) · [C3 goldens](https://github.com/sebkoo/maekbeat/commit/6ba9c91) · [C4 architecture](https://github.com/sebkoo/maekbeat/commit/aa568a5)                                                    |
 | 3 — Server               | Fastify, WS ingest, alert engine, tests, coverage gate                                                                                        | ✅     | [C5 skeleton](https://github.com/sebkoo/maekbeat/commit/d352705) · [C6 ingest](https://github.com/sebkoo/maekbeat/commit/0170638) · [C7 alerts](https://github.com/sebkoo/maekbeat/commit/2a1d563) · [C8 tests](https://github.com/sebkoo/maekbeat/commit/2356a62) · [C9 gate](https://github.com/sebkoo/maekbeat/commit/eba4e44) |
-| 4 — Web                  | React scaffold, live chart, timeline + ack, tests                                                                                             | 🔄     | [C10 scaffold + tokens](https://github.com/sebkoo/maekbeat/commit/6e9c81c) · C11 live chart · C12–C13                                                                                                                                                                                                                             |
+| 4 — Web                  | React scaffold, live chart, timeline + ack, tests                                                                                             | 🔄     | [C10 tokens](https://github.com/sebkoo/maekbeat/commit/6e9c81c) · [C11 live chart](https://github.com/sebkoo/maekbeat/commit/8dfe023) · C12 timeline + ack + WCAG · C13                                                                                                                                                           |
 | 5 — iOS                  | SwiftUI, CoreBluetooth, notifications, XCTest                                                                                                 | ⬜     | C14–C17                                                                                                                                                                                                                                                                                                                           |
 | 6 — Infra & operations   | Docker + compose, OTel, CDK synth-in-CI, k6                                                                                                   | ⬜     | C18–C19                                                                                                                                                                                                                                                                                                                           |
 | 7 — Depth                | intended use, risk register, threat model, SBOM                                                                                               | ⬜     | C20–C22                                                                                                                                                                                                                                                                                                                           |

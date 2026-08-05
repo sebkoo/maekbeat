@@ -7,6 +7,7 @@ import { packageVersion } from "./version";
 const EXPECTED_PATHS = [
   "/devices",
   "/devices/{deviceId}/alerts",
+  "/devices/{deviceId}/alerts/{alertId}/decisions",
   "/devices/{deviceId}/frames",
   "/devices/{deviceId}/stream",
   "/healthz",

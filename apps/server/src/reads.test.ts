@@ -123,7 +123,8 @@ describe("GET /devices/:deviceId/alerts", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
       deviceId: "rest-dev",
-      counters: { raised: 0, resolved: 0, suppressed: 0 },
+      counters: { raised: 0, resolved: 0, suppressed: 0, acknowledged: 0, dismissed: 0 },
+      decisions: [],
       alerts: [],
     });
   });
@@ -153,7 +154,13 @@ describe("GET /devices/:deviceId/alerts", () => {
       counters: Record<string, number>;
       alerts: Record<string, unknown>[];
     }>();
-    expect(body.counters).toEqual({ raised: 1, resolved: 1, suppressed: 0 });
+    expect(body.counters).toEqual({
+      raised: 1,
+      resolved: 1,
+      suppressed: 0,
+      acknowledged: 0,
+      dismissed: 0,
+    });
     expect(body.alerts).toHaveLength(1);
     expect(body.alerts[0]).toMatchObject({
       deviceId: "rest-dev",

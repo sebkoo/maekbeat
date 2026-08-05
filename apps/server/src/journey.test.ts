@@ -116,7 +116,13 @@ describe("full journey: vitals-sim -> WS -> ingest -> engine -> REST", () => {
       counters: Record<string, number>;
       alerts: Record<string, unknown>[];
     }>();
-    expect(alerts.counters).toEqual({ raised: 1, resolved: 1, suppressed: 0 });
+    expect(alerts.counters).toEqual({
+      raised: 1,
+      resolved: 1,
+      suppressed: 0,
+      acknowledged: 0,
+      dismissed: 0,
+    });
     expect(alerts.alerts).toHaveLength(1);
     const alert = alerts.alerts[0] as {
       metric: string;

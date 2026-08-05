@@ -1,6 +1,6 @@
 # @maekbeat/web
 
-The caregiver dashboard, C10–C11 of [docs/ROADMAP.md](../../docs/ROADMAP.md): a React 19 + Vite + TypeScript app with the design tokens the rest of Phase 4 draws from, a typed client for the [apps/server](../server) surface, and — since C11 — live vitals over the fan-out WebSocket. The device list is still one REST read per mount; the device page reads once and then streams.
+The caregiver dashboard, C10–C12 of [docs/ROADMAP.md](../../docs/ROADMAP.md): a React 19 + Vite + TypeScript app with the design tokens the rest of Phase 4 draws from, a typed client for the [apps/server](../server) surface, and — since C11 — live vitals over the fan-out WebSocket. C12 adds the alert timeline, server-recorded acknowledgement, and the WCAG 2.2 AA pass.
 
 ## Run it
 
@@ -26,7 +26,7 @@ Every colour, space, size, and radius lives in [src/styles/tokens.css](src/style
 
 There is one accent (`--mb-color-accent`) because this is a clinical-adjacent monitoring surface: colour carries state, not decoration. Dark mode arrives through `prefers-color-scheme`, where the block redefines exactly the colour tokens — spacing, type, radii, and the alert marks stay put, so the shape of the interface does not change when the lights go out.
 
-[src/styles/tokens.test.ts](src/styles/tokens.test.ts) enforces all of it across every shipped file: families present, one accent, dark parity, no colour literal or paint attribute outside tokens.css, no dangling `var(--mb-*)`, and no token without a reader. Text pairs are asserted at 4.5:1 in both themes and meaningful non-text pairs at 3:1 (WCAG 2.2 SC 1.4.3 and 1.4.11 contrast minimums); the full WCAG 2.2 AA pass — focus order, target size, reflow — lands at C12.
+[src/styles/tokens.test.ts](src/styles/tokens.test.ts) enforces all of it across every shipped file: families present, one accent, dark parity, no colour literal or paint attribute outside tokens.css, no dangling `var(--mb-*)`, and no token without a reader. Text pairs are asserted at 4.5:1 in both themes and meaningful non-text pairs at 3:1 (WCAG 2.2 SC 1.4.3 and 1.4.11 contrast minimums). The rest of the WCAG 2.2 AA work landed at C12 and is described below.
 
 ## Alert state palette
 
@@ -79,9 +79,33 @@ Only the newest session is drawn. `sessionEpoch` bumps when a device reboots or 
 
 The two metrics render as separate small multiples sharing one time axis — no dual y-axis, which would invite comparing shapes that are not comparable. Alert marks reuse the palette of [docs/DECISIONS.md](../../docs/DECISIONS.md) #12, with the badge's border style mirrored as a stroke dash pattern so the three states stay apart in greyscale. Nothing in the chart animates: an eased line would put the newest sample on screen later than it arrived.
 
+## Acknowledgement and the timeline (C12)
+
+An alert episode is one row, not one row per firing: the C7 engine already gives one `alertId` per breach episode, so a 30-tick anomaly reads as a single entry with a duration. Alarm fatigue is the design constraint the C21 risk register will cite, and a timeline that counted firings would manufacture the noise the engine exists to prevent. [src/components/AlertTimeline.tsx](src/components/AlertTimeline.tsx) puts the newest episode first and repeats the state encoding of [docs/DECISIONS.md](../../docs/DECISIONS.md) #12 on the row's leading edge — colour plus border style, so an episode's state survives greyscale.
+
+Acknowledgement is server state, not a checkbox. The dashboard POSTs to `/devices/:deviceId/alerts/:alertId/decisions` and the server appends an event to its log ([apps/server/src/acks.ts](../server/src/acks.ts)); the decision in force is derived by reading the newest event for an alert, never by mutating a row. A metric that dies on reload is not a metric, and the C23 product loop counts acknowledged against dismissed — the distinction that carries the false-alarm signal: `acknowledged` is seen and acted on, `dismissed` is seen and judged not actionable.
+
+Nothing is shown as decided until the server says so. The row goes busy while the request is in flight and the decision appears only from the appended event; a refusal leaves the buttons in place and states the reason, because a checkmark for an audit-log entry that does not exist would be the interface lying about a record. A decision recorded on another dashboard arrives over the same fan-out socket.
+
+## Accessibility (WCAG 2.2 AA, C12)
+
+[src/a11y.test.tsx](src/a11y.test.tsx) runs axe-core over the device list, the device page, and the page after a decision, and asserts zero violations. What that proves and what it does not is worth stating plainly: axe in jsdom checks structure — roles, names, labels, landmarks, heading order, duplicate ids — and cannot check anything requiring layout, so colour contrast is gated statically instead in [src/styles/tokens.test.ts](src/styles/tokens.test.ts) and target size is asserted as a CSS declaration rather than a measured box.
+
+Unproven here, and named rather than implied: no real screen reader has read this interface, no real browser has laid it out in CI, and reflow and focus visibility are argued from the stylesheet rather than measured. The Playwright smoke at C13 is where a real engine starts checking those.
+
+Every acknowledgement control is a real `<button>`: reachable by Tab, operable by Enter and Space, never a `div` with a click handler, and declared at 44x44 CSS pixels — past the 24x24 minimum of SC 2.5.8, asserted against the stylesheet in [src/styles/tokens.test.ts](src/styles/tokens.test.ts). Each carries an accessible name that begins with its visible word, so SC 2.5.3 holds and a voice user can say "Acknowledge" while a screen-reader user hears which episode it belongs to. The focus ring comes from the token accent and is never removed.
+
+### Why the chart is not a live region
+
+A vitals chart streaming at 1 Hz inside `aria-live` would interrupt a screen-reader user roughly once a second with a number they did not ask for. That is not access; it is a denial of it dressed as thoroughness. So the numbers stay silent and remain available on demand — each chart is `role="img"` with a summary label a user reads when they navigate to it.
+
+At rest the page has exactly one live region ([src/components/AlertAnnouncer.tsx](src/components/AlertAnnouncer.tsx)), it is `polite`, and it announces three things: an alert changing state, a decision landing, and the feed dropping or returning. It stays silent for the backlog present at page load, because arriving somewhere is not news.
+
+`polite` rather than `assertive` even for a raised alert: the timeline, the badge, and the row order carry the same information without cutting off whatever the user is reading. The one assertive region is deliberate and appears only on a refused decision — a failed action the user has to know about now. The tests assert the chart has no live-region ancestor by role as well as by attribute, that twenty streamed frames leave the region empty, and that the refusal adds exactly one assertive region.
+
 ## API client
 
-[src/api/client.ts](src/api/client.ts) types the six-route surface pinned by [apps/server/src/openapi.test.ts](../server/src/openapi.test.ts): `/healthz`, `/devices`, `/devices/:deviceId/frames`, and `/devices/:deviceId/alerts` over HTTP; `/devices/:deviceId/stream`, the fan-out socket `subscribe()` opens; and `/ingest`, whose URL `ingestUrl()` derives for the C14 gateway — the device-to-server leg this app never sends on.
+[src/api/client.ts](src/api/client.ts) types the seven-route surface pinned by [apps/server/src/openapi.test.ts](../server/src/openapi.test.ts): `/healthz`, `/devices`, `/devices/:deviceId/frames`, `/devices/:deviceId/alerts`, and `POST /devices/:deviceId/alerts/:alertId/decisions` over HTTP; `/devices/:deviceId/stream`, the fan-out socket `subscribe()` opens; and `/ingest`, whose URL `ingestUrl()` derives for the C14 gateway — the device-to-server leg this app never sends on.
 
 The fetch call is isolated in [src/api/http.ts](src/api/http.ts) and the socket in [src/api/stream.ts](src/api/stream.ts), both injected (`fetchImpl`, `createSocket`, `schedule`), so tests drive a fake socket and a fake clock and never patch globals — and a source scan in [src/styles/tokens.test.ts](src/styles/tokens.test.ts) fails the build if any other file opens a connection. Components reach data only through the context in [src/data/api-context.tsx](src/data/api-context.tsx): C11 added the `subscribe` member there, exactly as the C10 seam was built for, and no component constructs a transport.
 

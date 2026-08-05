@@ -70,3 +70,76 @@ describe("central error handler", () => {
     await app.close();
   });
 });
+
+describe("CORS", () => {
+  // The dashboard is served from a different origin than this API in every
+  // setup the repo documents, so a browser blocks every read unless the server
+  // says otherwise. No test crossed an origin before C12 and the mocked-fetch
+  // suites could not have caught it; the demo capture did.
+  it("allows any origin by default, because the server is unauthenticated and synthetic", async () => {
+    const app = await buildApp(loadConfig({ NODE_ENV: "test", LOG_LEVEL: "silent" }));
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/devices",
+      headers: { origin: "http://127.0.0.1:5173" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    // origin:true reflects the caller's origin, which allows the read exactly
+    // as "*" would while keeping the header specific.
+    expect(response.headers["access-control-allow-origin"]).toBe("http://127.0.0.1:5173");
+    await app.close();
+  });
+
+  it("answers the preflight a POST of a decision triggers", async () => {
+    const app = await buildApp(loadConfig({ NODE_ENV: "test", LOG_LEVEL: "silent" }));
+
+    const response = await app.inject({
+      method: "OPTIONS",
+      url: "/devices/dev-1/alerts/a1/decisions",
+      headers: {
+        origin: "http://127.0.0.1:5173",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type",
+      },
+    });
+
+    expect([200, 204]).toContain(response.statusCode);
+    expect(response.headers["access-control-allow-methods"]).toContain("POST");
+    await app.close();
+  });
+
+  it("honours an explicit allowlist and refuses an origin outside it", async () => {
+    const app = await buildApp(
+      loadConfig({
+        NODE_ENV: "test",
+        LOG_LEVEL: "silent",
+        CORS_ORIGIN: "https://dash.example, https://ops.example",
+      }),
+    );
+
+    const allowed = await app.inject({
+      method: "GET",
+      url: "/devices",
+      headers: { origin: "https://dash.example" },
+    });
+    expect(allowed.headers["access-control-allow-origin"]).toBe("https://dash.example");
+
+    // The second entry carries a leading space, so the trim is load-bearing.
+    const spaced = await app.inject({
+      method: "GET",
+      url: "/devices",
+      headers: { origin: "https://ops.example" },
+    });
+    expect(spaced.headers["access-control-allow-origin"]).toBe("https://ops.example");
+
+    const refused = await app.inject({
+      method: "GET",
+      url: "/devices",
+      headers: { origin: "https://not-listed.example" },
+    });
+    expect(refused.headers["access-control-allow-origin"]).toBeUndefined();
+    await app.close();
+  });
+});

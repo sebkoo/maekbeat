@@ -43,6 +43,7 @@ export interface HttpClientOptions {
 export interface HttpClient {
   readonly baseUrl: string;
   getJson<T>(path: string, schema: ZodType<T>, signal?: AbortSignal): Promise<T>;
+  postJson<T>(path: string, body: unknown, schema: ZodType<T>, signal?: AbortSignal): Promise<T>;
 }
 
 function isAbortError(cause: unknown): boolean {
@@ -67,47 +68,64 @@ export function createHttpClient(options: HttpClientOptions): HttpClient {
   const baseUrl = options.baseUrl.replace(/\/+$/, "");
   const doFetch: FetchLike = options.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
 
+  /** One request path for both verbs: same error taxonomy, same contract check. */
+  async function request<T>(
+    method: "GET" | "POST",
+    path: string,
+    schema: ZodType<T>,
+    options: { body?: unknown; signal?: AbortSignal } = {},
+  ): Promise<T> {
+    const url = `${baseUrl}${path}`;
+    const { body, signal } = options;
+
+    let response: Response;
+    try {
+      response = await doFetch(url, {
+        method,
+        ...(signal ? { signal } : {}),
+        headers: {
+          accept: "application/json",
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
+    } catch (cause) {
+      // An abort is the caller's own doing (route change, unmount) and must
+      // stay distinguishable from the server being unreachable.
+      if (isAbortError(cause)) throw cause;
+      throw new ApiError("network", `cannot reach the Maekbeat API at ${url}`, { cause });
+    }
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new ApiError("http", messageFromBody(text, response.status), {
+        status: response.status,
+      });
+    }
+
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch (cause) {
+      throw new ApiError("contract", `${url} did not return JSON`, { cause });
+    }
+
+    const parsed = schema.safeParse(payload);
+    if (!parsed.success) {
+      const where = parsed.error.issues[0]?.path.join(".") || "(root)";
+      throw new ApiError(
+        "contract",
+        `${url} did not match the @maekbeat/protocol contract at ${where}`,
+        { cause: parsed.error },
+      );
+    }
+    return parsed.data;
+  }
+
   return {
     baseUrl,
-    async getJson<T>(path: string, schema: ZodType<T>, signal?: AbortSignal): Promise<T> {
-      const url = `${baseUrl}${path}`;
-
-      let response: Response;
-      try {
-        response = await doFetch(url, { signal, headers: { accept: "application/json" } });
-      } catch (cause) {
-        // An abort is the caller's own doing (route change, unmount) and must
-        // stay distinguishable from the server being unreachable.
-        if (isAbortError(cause)) throw cause;
-        throw new ApiError("network", `cannot reach the Maekbeat API at ${url}`, { cause });
-      }
-
-      if (!response.ok) {
-        const body = await response.text().catch(() => "");
-        throw new ApiError("http", messageFromBody(body, response.status), {
-          status: response.status,
-        });
-      }
-
-      let body: unknown;
-      try {
-        body = await response.json();
-      } catch (cause) {
-        throw new ApiError("contract", `${url} did not return JSON`, { cause });
-      }
-
-      const parsed = schema.safeParse(body);
-      if (!parsed.success) {
-        const where = parsed.error.issues[0]?.path.join(".") || "(root)";
-        throw new ApiError(
-          "contract",
-          `${url} did not match the @maekbeat/protocol contract at ${where}`,
-          {
-            cause: parsed.error,
-          },
-        );
-      }
-      return parsed.data;
-    },
+    getJson: (path, schema, signal) => request("GET", path, schema, signal ? { signal } : {}),
+    postJson: (path, body, schema, signal) =>
+      request("POST", path, schema, signal ? { body, signal } : { body }),
   };
 }

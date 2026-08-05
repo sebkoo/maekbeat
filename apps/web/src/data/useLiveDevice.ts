@@ -1,4 +1,9 @@
-import type { AlertEvent } from "@maekbeat/protocol";
+import {
+  latestDecisions,
+  type AlertDecision,
+  type AlertDecisionEvent,
+  type AlertEvent,
+} from "@maekbeat/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { StoredFrame } from "../api/contracts";
@@ -20,12 +25,20 @@ export const BACKFILL_LIMIT = 1_000;
 export interface LiveWindow {
   frames: StoredFrame[];
   alerts: AlertEvent[];
+  /** The device's append-only decision log, oldest first (C12). */
+  decisions: AlertDecisionEvent[];
   /**
    * Process-lifetime counters from apps/server, as of the last REST read —
    * mount or reconnect back-fill. `suppressed` episodes never produce an alert
    * record, so this is the only place that number can come from.
    */
-  counters: { raised: number; resolved: number; suppressed: number };
+  counters: {
+    raised: number;
+    resolved: number;
+    suppressed: number;
+    acknowledged: number;
+    dismissed: number;
+  };
 }
 
 export interface LiveDevice {
@@ -35,6 +48,14 @@ export interface LiveDevice {
   connection: ConnectionState;
   /** Messages the protocol contract rejected: dropped, counted, never drawn. */
   malformed: number;
+  /** Decision in force per alertId, derived from the log — never stored. */
+  decisions: ReadonlyMap<string, AlertDecisionEvent>;
+  /** Alert ids with a decision in flight. */
+  pendingDecisions: ReadonlySet<string>;
+  /** Alert ids whose last decision failed, with the reason. */
+  decisionFailures: ReadonlyMap<string, string>;
+  /** Records a decision; resolves once the server has appended it. */
+  decide: (alertId: string, decision: AlertDecision) => Promise<void>;
 }
 
 const frameKey = (frame: StoredFrame) => `${frame.sessionEpoch}:${frame.seq}`;
@@ -54,6 +75,29 @@ export function mergeFrames(current: readonly StoredFrame[], incoming: readonly 
     (a, b) => a.sessionEpoch - b.sessionEpoch || a.capturedAtMs - b.capturedAtMs || a.seq - b.seq,
   );
   return merged.length > MAX_FRAMES ? merged.slice(merged.length - MAX_FRAMES) : merged;
+}
+
+/** The append counter the server embeds in an eventId (`<device>:decision:<n>`). */
+function appendOrdinal(eventId: string): number {
+  const ordinal = Number(eventId.slice(eventId.lastIndexOf(":") + 1));
+  return Number.isFinite(ordinal) ? ordinal : 0;
+}
+
+/** The log is append-only, so merging is union-by-eventId, never replacement. */
+export function mergeDecisions(
+  current: readonly AlertDecisionEvent[],
+  incoming: readonly AlertDecisionEvent[],
+) {
+  if (incoming.length === 0) return current as AlertDecisionEvent[];
+  const byId = new Map(current.map((event) => [event.eventId, event]));
+  for (const event of incoming) byId.set(event.eventId, event);
+  // Ties break on the server's append ordinal, which eventId carries: two
+  // decisions inside one millisecond must not be ordered by which socket
+  // message happened to arrive first.
+  return [...byId.values()].sort(
+    (a, b) =>
+      a.recordedAtMs - b.recordedAtMs || appendOrdinal(a.eventId) - appendOrdinal(b.eventId),
+  );
 }
 
 /** An alert keeps its identity across states, so a transition replaces it. */
@@ -86,7 +130,12 @@ export function useLiveDevice(deviceId: string): LiveDevice {
         api.readFrames(deviceId, { limit: BACKFILL_LIMIT }, signal),
         api.readAlerts(deviceId, signal),
       ]);
-      return { frames: frames.frames, alerts: alerts.alerts, counters: alerts.counters };
+      return {
+        frames: frames.frames,
+        alerts: alerts.alerts,
+        decisions: alerts.decisions,
+        counters: alerts.counters,
+      };
     },
     [api, deviceId],
   );
@@ -98,21 +147,28 @@ export function useLiveDevice(deviceId: string): LiveDevice {
   // two-second hole, small enough to fall under the gap threshold and be drawn
   // as continuous — silence rendered as coverage, the thing this file exists to
   // prevent. Merging is keyed, so overlap with the REST snapshot costs nothing.
-  const pending = useRef<{ frames: StoredFrame[]; alerts: AlertEvent[] }>({
-    frames: [],
-    alerts: [],
-  });
+  const pending = useRef<{
+    frames: StoredFrame[];
+    alerts: AlertEvent[];
+    decisions: AlertDecisionEvent[];
+  }>({ frames: [], alerts: [], decisions: [] });
+
+  /** The current subscription's signal, read by decide() to detect staleness. */
+  const subscriptionScope = useRef<AbortSignal>(new AbortController().signal);
 
   // The socket is opened once per device and closed on unmount or device
   // change; nothing else in the app opens one.
   useEffect(() => {
     setLive(null);
     setMalformed(0);
-    pending.current = { frames: [], alerts: [] };
+    setPendingDecisions(new Set());
+    setDecisionFailures(new Map());
+    pending.current = { frames: [], alerts: [], decisions: [] };
     // Scopes the back-fill to this subscription: a read still in flight when
     // the device changes must never merge one device's frames into another's
     // window.
     const controller = new AbortController();
+    subscriptionScope.current = controller.signal;
 
     const subscription = api.subscribe(deviceId, {
       onFrame: (frame) =>
@@ -131,6 +187,16 @@ export function useLiveDevice(deviceId: string): LiveDevice {
           }
           return { ...current, alerts: mergeAlerts(current.alerts, [alert]) };
         }),
+      onDecision: (event) => {
+        clearFailure(event.alertId);
+        setLive((current) => {
+          if (current === null) {
+            pending.current.decisions.push(event);
+            return current;
+          }
+          return { ...current, decisions: mergeDecisions(current.decisions, [event]) };
+        });
+      },
       onState: setConnection,
       onReconnect: () => {
         void (async () => {
@@ -151,6 +217,7 @@ export function useLiveDevice(deviceId: string): LiveDevice {
                 : {
                     frames: mergeFrames(current.frames, frames.frames),
                     alerts: mergeAlerts(current.alerts, alerts.alerts),
+                    decisions: mergeDecisions(current.decisions, alerts.decisions),
                     counters: alerts.counters,
                   },
             );
@@ -178,23 +245,94 @@ export function useLiveDevice(deviceId: string): LiveDevice {
     setLive((current) => {
       if (current === null) {
         const held = pending.current;
-        pending.current = { frames: [], alerts: [] };
+        pending.current = { frames: [], alerts: [], decisions: [] };
         return {
           frames: mergeFrames(seed.frames, held.frames),
           alerts: mergeAlerts(seed.alerts, held.alerts),
+          decisions: mergeDecisions(seed.decisions, held.decisions),
           counters: seed.counters,
         };
       }
       return {
         frames: mergeFrames(current.frames, seed.frames),
         alerts: mergeAlerts(current.alerts, seed.alerts),
+        decisions: mergeDecisions(current.decisions, seed.decisions),
         counters: seed.counters,
       };
     });
   }, [state]);
 
+  const [pendingDecisions, setPendingDecisions] = useState<ReadonlySet<string>>(new Set());
+  const [decisionFailures, setDecisionFailures] = useState<ReadonlyMap<string, string>>(new Map());
+
+  /**
+   * A recorded decision retires any failure banner for that alert, whatever
+   * path the decision arrived by — this dashboard's own POST, another
+   * dashboard's over the socket, or a REST re-read. Otherwise the row would
+   * show the decision and "not recorded" at the same time, and the second
+   * claim would be a lie about the audit log that nothing could ever clear.
+   */
+  const clearFailure = useCallback((alertId: string) => {
+    setDecisionFailures((current) => {
+      if (!current.has(alertId)) return current;
+      const next = new Map(current);
+      next.delete(alertId);
+      return next;
+    });
+  }, []);
+
+  /**
+   * Records a decision. The row goes busy immediately, but no decision is shown
+   * until the server has appended one: an optimistic checkmark that a failed
+   * request leaves behind would be the UI asserting an audit-log entry that
+   * does not exist. On failure the row says so and offers the buttons again.
+   */
+  const decide = useCallback(
+    async (alertId: string, decision: AlertDecision) => {
+      // Scoped like every other async path here: a POST still in flight when
+      // the route moves to another device must not merge this device's
+      // decision — or its failure — into that one's window.
+      const scope = subscriptionScope.current;
+      setPendingDecisions((current) => new Set(current).add(alertId));
+      clearFailure(alertId);
+      try {
+        const event = await api.recordDecision(deviceId, alertId, decision);
+        if (scope.aborted) return;
+        setLive((current) =>
+          current === null
+            ? current
+            : { ...current, decisions: mergeDecisions(current.decisions, [event]) },
+        );
+      } catch (cause) {
+        if (scope.aborted) return;
+        const message = cause instanceof Error ? cause.message : String(cause);
+        setDecisionFailures((current) => new Map(current).set(alertId, message));
+      } finally {
+        if (!scope.aborted) {
+          setPendingDecisions((current) => {
+            const next = new Set(current);
+            next.delete(alertId);
+            return next;
+          });
+        }
+      }
+    },
+    [api, deviceId, clearFailure],
+  );
+
   const merged: AsyncState<LiveWindow> =
     state.status === "ready" && live !== null ? { status: "ready", data: live } : state;
 
-  return { state: merged, reload, connection, malformed };
+  return {
+    state: merged,
+    reload,
+    connection,
+    malformed,
+    // Derived on every render from the log: the decision in force is a reading
+    // of the events, never a field anyone writes.
+    decisions: latestDecisions(live?.decisions ?? []),
+    pendingDecisions,
+    decisionFailures,
+    decide,
+  };
 }

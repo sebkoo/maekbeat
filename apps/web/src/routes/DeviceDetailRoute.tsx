@@ -1,6 +1,7 @@
 import { useParams } from "react-router";
 
-import { AlertStateBadge } from "../components/AlertStateBadge";
+import { AlertAnnouncer } from "../components/AlertAnnouncer";
+import { AlertTimeline } from "../components/AlertTimeline";
 import { ConnectionBadge } from "../components/ConnectionBadge";
 import { ReadFailure, StatusPanel } from "../components/StatusPanel";
 import { VitalsChart } from "../components/VitalsChart";
@@ -26,7 +27,16 @@ function Metric(props: { label: string; value: string; unit: string }) {
  */
 export function DeviceDetailRoute() {
   const { deviceId = "" } = useParams<{ deviceId: string }>();
-  const { state, reload, connection, malformed } = useLiveDevice(deviceId);
+  const {
+    state,
+    reload,
+    connection,
+    malformed,
+    decisions,
+    pendingDecisions,
+    decisionFailures,
+    decide,
+  } = useLiveDevice(deviceId);
 
   if (state.status === "loading") {
     return (
@@ -44,6 +54,9 @@ export function DeviceDetailRoute() {
   }
 
   const { frames, alerts, counters } = state.data;
+  // Episode durations are measured against the newest frame's receive stamp,
+  // not a wall clock: every other time on this page comes from the pipeline.
+  const nowMs = frames[frames.length - 1]?.receivedAtMs ?? 0;
   const latest = frames[frames.length - 1];
 
   if (latest === undefined) {
@@ -60,6 +73,7 @@ export function DeviceDetailRoute() {
 
   return (
     <>
+      <AlertAnnouncer alerts={alerts} decisions={decisions} connection={connection} />
       <div className="mb-page__heading">
         <h1 className="mb-page__title">{deviceId}</h1>
         <ConnectionBadge state={connection} />
@@ -120,32 +134,21 @@ export function DeviceDetailRoute() {
         <h2 className="mb-card__title">Alerts</h2>
         <p className="mb-meta">
           At the last REST read: {counters.raised} raised · {counters.resolved} resolved ·{" "}
-          {counters.suppressed} suppressed. A suppressed episode leaves no record to stream, so that
+          {counters.suppressed} suppressed · {counters.acknowledged} acknowledged ·{" "}
+          {counters.dismissed} dismissed. A suppressed episode leaves no record to stream, so that
           number moves only when the window is re-read. Thresholds are demo heuristics, not clinical
           rules.
         </p>
-        {alerts.length === 0 ? (
-          <p className="mb-meta">No alerts recorded for this device.</p>
-        ) : (
-          // Keyed by alertId alone: it is stable across state changes by
-          // contract (packages/protocol), and C12 hangs acknowledgement off
-          // this row — a key that moved on transition would remount it.
-          <ul className="mb-alert-list">
-            {alerts.map((alert) => (
-              <li className="mb-alert-row" key={alert.alertId}>
-                <span>
-                  <AlertStateBadge state={alert.state} /> {alert.metric} {alert.direction}
-                </span>
-                <span className="mb-alert-row__meta">
-                  raised {formatInstant(alert.raisedAtMs)}
-                  {alert.resolvedAtMs === undefined
-                    ? ""
-                    : ` · resolved ${formatInstant(alert.resolvedAtMs)}`}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
+        <AlertTimeline
+          alerts={alerts}
+          decisions={decisions}
+          pending={pendingDecisions}
+          failures={decisionFailures}
+          nowMs={nowMs}
+          onDecide={(alertId, decision) => {
+            void decide(alertId, decision);
+          }}
+        />
       </section>
     </>
   );
