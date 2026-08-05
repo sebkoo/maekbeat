@@ -13,15 +13,25 @@ export default defineConfig({
       include: ["src/**/*.ts"],
       exclude: ["src/**/*.test.ts"],
       reporter: ["text", "lcov"],
-      // Ratchet, not aspiration (CLAUDE.md): set just under the C8 measured
-      // floor — 92.88% statements / 94.64% branches / 91.66% functions /
-      // 92.79% lines. These numbers only move up, each raise its own commit;
-      // lowering one to make a build pass is forbidden.
+      // Ratchet, not aspiration (CLAUDE.md): these numbers only move up, each
+      // raise its own commit, and lowering one to make a build pass is
+      // forbidden.
+      //
+      // Convention, unchanged since C9: each threshold is the greatest integer
+      // leaving two to three points of headroom under the measurement. The
+      // headroom is not slack — it is what keeps a legitimate refactor that
+      // moves coverage by a rounding margin from reddening the build, while a
+      // real regression, which moves it further, still does.
+      //
+      // Raised here against a measured 95.16% statements / 95.10% branches /
+      // 95.58% functions / 95.45% lines, with the untested process entry
+      // main.ts counted against every one of them. Previous floor: the C8
+      // measurement of 92.88 / 94.64 / 91.66 / 92.79, gated at 90 / 92 / 89 / 90.
       thresholds: {
-        statements: 90,
-        branches: 92,
-        functions: 89,
-        lines: 90,
+        statements: 93,
+        branches: 93,
+        functions: 93,
+        lines: 93,
       },
     },
   },
