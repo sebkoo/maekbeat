@@ -34,7 +34,14 @@ final class FakeTransport {
     private(set) var scheduledDelaysMs: [Int] = []
     private(set) var cancellations = 0
 
-    private var pending: [() -> Void] = []
+    /// Keyed by a ticket rather than by position. An earlier version indexed
+    /// into an array that `fireScheduled` emptied, so a canceller held from
+    /// before a firing zeroed whichever timer had since taken slot 0 — a spent
+    /// canceller silently killing a live deadline, which can only ever turn a
+    /// red into a green. Found by the C17 property suite, which cancels and
+    /// fires in the same run hundreds of times.
+    private var pending: [(ticket: Int, run: () -> Void)] = []
+    private var nextTicket = 0
 
     var latest: FakeSocket? { sockets.last }
 
@@ -49,11 +56,12 @@ final class FakeTransport {
     var scheduler: Scheduler {
         { [weak self] delayMs, run in
             self?.scheduledDelaysMs.append(delayMs)
-            let index = self?.pending.count ?? 0
-            self?.pending.append(run)
+            let ticket = self?.nextTicket ?? 0
+            self?.nextTicket = ticket + 1
+            self?.pending.append((ticket, run))
             return { [weak self] in
                 self?.cancellations += 1
-                if let self, index < self.pending.count { self.pending[index] = {} }
+                self?.pending.removeAll { $0.ticket == ticket }
             }
         }
     }
@@ -62,7 +70,18 @@ final class FakeTransport {
     func fireScheduled() {
         let due = pending
         pending = []
-        for run in due { run() }
+        for entry in due { entry.run() }
+    }
+
+    /// Fires the oldest pending timer, which is the one a real clock would
+    /// reach first when the delays are equal or growing. Returns false when
+    /// nothing is due, so a caller can tell "fired" from "there was nothing".
+    @discardableResult
+    func fireOldest() -> Bool {
+        guard !pending.isEmpty else { return false }
+        let entry = pending.removeFirst()
+        entry.run()
+        return true
     }
 
     var pendingCount: Int { pending.count }

@@ -1,6 +1,6 @@
 # Maekbeat for iOS
 
-C14–C16 of [docs/ROADMAP.md](../../docs/ROADMAP.md): a SwiftUI app that reads a local [apps/server](../server) over REST, subscribes to its WebSocket fan-out, implements the BLE central role of [docs/ble-gatt-profile.md](../../docs/ble-gatt-profile.md), forwards what it receives to `/ingest`, and — since C16 — turns the server's alerts into local notifications a caregiver can answer. SwiftLint gates the sources, XCTest gates the behaviour, and a line-coverage ratchet gates the suite.
+C14–C17 of [docs/ROADMAP.md](../../docs/ROADMAP.md): a SwiftUI app that reads a local [apps/server](../server) over REST, subscribes to its WebSocket fan-out, implements the BLE central role of [docs/ble-gatt-profile.md](../../docs/ble-gatt-profile.md), forwards what it receives to `/ingest`, and — since C16 — turns the server's alerts into local notifications a caregiver can answer. SwiftLint gates the sources, XCTest gates the behaviour, and a line-coverage ratchet gates the suite.
 
 ## What runs today
 
@@ -49,6 +49,7 @@ An iOS Simulator has no Bluetooth stack and a CI runner has no peripheral, so mo
 | Behaviour                                                            | Verified by CI                              | Needs a physical device |
 | -------------------------------------------------------------------- | ------------------------------------------- | ----------------------- |
 | Every state transition and every rejected one                        | yes — all 99 cells of the 9 × 11 matrix     | no                      |
+| Properties of a whole run, not one step                              | yes — 8 seeds × 500 random events (C17)     | no                      |
 | Timeouts, backoff, stall detection, recovery                         | yes — fake clock                            | no                      |
 | Effects reaching the radio in the right order                        | yes — mock central                          | no                      |
 | Payload decode, MTU arithmetic, bounds, version                      | yes — bytes are bytes                       | no                      |
@@ -184,6 +185,154 @@ That is the reason the adapter holds no decisions at all. It translates an autho
 
 None of that has been run. It is a procedure, not a result.
 
+## Closing the seams (C17)
+
+Phase 5 kept finding one defect wearing different clothes: a unit suite proving
+its own behaviour while nothing proved the composition. C12a's retention was
+correct and unwired, C12's CORS was correct and had never crossed an origin,
+C14's fast local loop compiled less than it looked, C16's notify rule was right
+about `raised` and wrong about the only path a cold launch has. C17 asks the
+question those share — **what here is only ever exercised through an
+explicitly-injected dependency, so the default path has no caller?** — and gives
+each answer a test that takes it.
+
+### The defaults, and the sixth defect
+
+Every port in this package is injectable and every suite injects, which is what
+makes the suite fast and is also how a default resolution ends up unreached.
+[DefaultPathTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/DefaultPathTests.swift)
+and [DefaultValueTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/DefaultValueTests.swift)
+are the enumeration: the real `URLSession` transport, the real timer and its
+canceller, the real fan-out and uplink sockets through the clients that build
+them, the driver's fallback scheduler, the three defaulted `StreamHandlers`
+closures, the inert `#else` ports, the queue's shipped capacity and batch bound, and the
+`ios-gateway` actor on a decision. The device screen's production initialiser is
+the same family and lives in `ViewRenderingTests`, because rendering it is what
+takes it. C16 had already paid for one of these: `APIClient`'s transport was
+a default argument, every unit test passed one explicitly, and the first caller
+to take the default from an `async` function segfaulted the process rather than
+failing.
+
+The largest was not a default at all but the composition above them.
+**`RootView` took a `GatewayModel`, rendered its state, and never called
+`start()`.** The shipped app therefore opened no `/ingest` socket and began no
+scan — it sat on `disconnected(wantsLink: false)` for as long as it ran.
+
+Every test in `GatewayModelTests` passed throughout, because each of them calls
+`start()` itself: the lines were covered and the caller was not the app.
+[CompositionTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/CompositionTests.swift)
+is what caught it, and the fix is one line in
+[RootView.swift](MaekbeatKit/Sources/MaekbeatKit/Views/RootView.swift).
+
+That file is possible because of a fact recorded the other way round in C16's
+mutation log — "a rendered SwiftUI view does not run its own `.task` in these
+tests". It runs one, given a **key** window and an `await` for the result: a
+window that is only laid out never gets that far, which is why
+`ViewRenderingTests` sees no tasks and why that entry was true as written. Two
+source scans became assertions about what happened as a result: the root screen
+really does register the notification actions, and the link screen really does
+re-read the permission every time it appears.
+
+### Properties, not examples
+
+The C15 and C16 adversarial findings are permanent seeded suites now, the way
+C8 did it for apps/server. Fixed seeds, fixed lengths, deterministic in CI, and
+every failure names the seed and the step.
+
+[BLELinkPropertyTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/BLELinkPropertyTests.swift)
+runs eight seeds of five hundred events over the transition table. The matrix
+suite asserts ninety-nine cells one step deep; this asserts properties of a
+_run_: no landing outside `LinkState.allCases`, a rejected event that changes
+nothing at all, a backoff always sized by the attempt that earned it,
+`hasStreamed` earned only by streaming and lost only by stopping — and the
+invariant C15 wrote down and could only spot-check, **every scheduled effect has
+an owner state, and leaving that state cancels it**.
+
+It found a violation on its first run, at seed 1 step 435. `connecting` is two
+situations under one name — trying now, and waiting out a backoff after a failed
+attempt — and a connect that landed in the second left the retry timer running.
+
+That timer fired `retryDue` into `connected` seconds later, where the machine
+rejected it and the link screen counted an "unexpected radio event" the radio
+had not produced, in the one counter whose entire job is to mean the opposite.
+The fix adds `cancelRetry` to that transition, and the matrix cell and the
+connect-path scenario moved with it.
+
+[NotificationPropertyTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/NotificationPropertyTests.swift)
+runs six seeds of four hundred steps over six episodes, interleaving fan-out
+replays, REST re-seeds, resolutions, decisions from either client, and a
+caregiver answering a banner. One episode never produces two banners, a closed
+episode never has one standing, nothing is withdrawn that was not scheduled, and
+delivered + withdrawn + suppressed always equals the number of things the
+coordinator was asked to judge — a suppression that goes uncounted is the
+alarm-fatigue argument losing its evidence.
+
+Its first run failed, and the oracle was wrong rather than the code: it replayed
+`ongoing` for an episode it had already resolved. An `alertId` names one breach
+episode for its whole life (C7) and the server mints a new id for the next
+breach, so a resolved episode never reopens under it. The generator was fixed,
+not the policy.
+
+### Failure paths, against a server that is really failing
+
+[ServerFailureIntegrationTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/ServerFailureIntegrationTests.swift)
+launches a real `apps/server` and breaks it five ways, because a stub told to
+throw is not the same event as a process that has stopped listening — and the
+whole point of splitting `APIFailure` into `network`, `http` and `contract` is
+that the screen has to tell those apart.
+
+- **Cold launch against a server that is gone.** Both screens must say
+  `disconnected`, not `empty`. `empty` is a claim the server answered.
+- **A decision posted to a dead server.** The banner stays: withdrawing it would
+  be the interface claiming a log entry that does not exist. The 404 half — the
+  server refusing a decision on an alert it never raised — is C15's.
+- **The fan-out socket cut mid-episode and resumed.** This is also where
+  `URLSessionStreamSocket`'s success path finally gets coverage; C14 recorded
+  that gap and it stayed open through C16.
+- **An alert raised while the socket was down.** It has to reach the caregiver
+  when the socket returns.
+- **A refused permission.** Nothing scheduled, the refusal counted, and the
+  episode still readable on the screen.
+
+The fourth found the second real defect. `backfill()` re-read frames and not
+alerts, so an episode that opened during an outage produced no fan-out message
+and nothing ever asked for it again — the chart healed across the gap and the
+alarm did not exist. "Silence is not continuity" was written about frames at C11
+and is truer about alerts.
+
+`DeviceDetailModel.backfill()` now re-reads the alert history too. Re-offering
+episodes already seen is safe by construction: `NotificationPolicy` keys on
+`alertId` and refuses a repeat, which is why it is a policy rather than a
+branch.
+
+### What C17 did not close, stated rather than implied
+
+Three defaults have no test because no assertion can be written on the far side
+of the call, and the reason was taken from a run rather than from documentation.
+On the iOS 26.5 simulator, 2026-08-06:
+
+| Call                              | What actually happens                                                                                                                                                                                      |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GatewayModel.live()`             | `NSInternalInconsistencyException` at `CoreBluetoothCentral.swift:61` — "State restoration of CBCentralManager is only allowed for applications that have specified the bluetooth-central background mode" |
+| `NotificationCoordinator.live()`  | `NSInternalInconsistencyException` at `UserNotificationCenterAdapter.swift:34` — "bundleProxyForCurrentProcess is nil"                                                                                     |
+| `UserNotificationCenterAdapter()` | the same raise; it is the default argument `.current()` that does it                                                                                                                                       |
+
+An ObjC exception is not catchable from Swift, so these end the test process
+rather than failing a test. The compensating control is unchanged from C14 — a
+source scan asserting the app shell constructs both factories — and it is a
+weaker control than a call, which is why it is named here.
+
+One result contradicts a guess and is worth recording as such: `GatewayModel.live()`
+**does** construct on the macOS host, where CoreBluetooth does not enforce the
+background-mode rule. The simulator is the platform the gate runs on, and there
+it raises.
+
+Also still uncovered, and none of it accidental: the SwiftUI closures that only
+run on user interaction — the retry button on a failed read, the permission-ask
+button, and the `navigationDestination` that builds the device screen — because
+this package has no UI-automation harness, and the `CoreBluetooth` delegate
+methods, which need a peripheral.
+
 ## The cross-language contract
 
 `packages/protocol` is the source of truth, and the Swift types in [MaekbeatKit/Sources/MaekbeatKit/Contract/](MaekbeatKit/Sources/MaekbeatKit/Contract) are hand-written against it. There is no code generation, deliberately: a generated type is a projection of the schema and agrees with it by construction, which proves nothing about the bytes on the wire.
@@ -216,7 +365,7 @@ The honest closure for rows 2 and 3 is a committed artifact both languages read 
 
 [StreamClient.swift](MaekbeatKit/Sources/MaekbeatKit/Transport/StreamClient.swift) is the same design as [apps/web/src/api/stream.ts](../web/src/api/stream.ts), on purpose and with the same numbers: 500 ms doubling to a 15 s cap, `disconnected` after three consecutive failures while retries continue, and the connection state reported on transitions only. Two clients that reconnect differently would be two answers to one question.
 
-Both the socket and the timer are ports, so the suite drives a fake socket and a fake clock and never waits on wall time — the whole 90-test run finishes in under a second. The rules the tests pin rather than the prose:
+Both the socket and the timer are ports, so almost every test drives a fake socket and a fake clock and never waits on wall time. The exceptions are named rather than left to be discovered: [DefaultPathTests](MaekbeatKit/Tests/MaekbeatKitTests/DefaultPathTests.swift) takes the real timer and the real socket against a refused port, which is the only way to cover the ports the app actually ships with, and the two macOS integration suites wait on a real server. The rules the tests pin rather than the prose:
 
 - **A connection that never existed is not a reconnection.** The label is derived in one place; deriving it in two is what let apps/web flip between "connecting" and "disconnected" forever (its C11 mutation log).
 - **Silence is not continuity.** Every re-open fires `onReconnect`, and [DeviceDetailModel](MaekbeatKit/Sources/MaekbeatKit/ViewState/DeviceDetailModel.swift) answers it with a REST back-fill from the newest frame it holds. A socket that dropped for forty seconds missed forty seconds.
@@ -231,7 +380,9 @@ Three files in the package touch the network — these two and [IngestClient.swi
 
 ### The one real socket, and what it does not prove
 
-`URLSessionStreamSocket` is the shipped factory, and [URLSessionSocketTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/URLSessionSocketTests.swift) opens a genuine socket at a refused loopback port to cover its construction, its failure branch, and close. The success path — a completed handshake, a delivered frame — has no coverage here, because proving it needs a live apps/server process. apps/web has that in its C13 Playwright smoke; apps/ios does not have an equivalent yet.
+`URLSessionStreamSocket` is the shipped factory, and [URLSessionSocketTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/URLSessionSocketTests.swift) opens a genuine socket at a refused loopback port to cover its construction, its failure branch, and close.
+
+The success path — a completed handshake, a delivered frame — needs a live apps/server process, which is why C14 through C16 recorded it as uncovered. C17 covers it in [ServerFailureIntegrationTests](MaekbeatKit/Tests/MaekbeatKitTests/ServerFailureIntegrationTests.swift), where the device screen subscribes to a real server over that socket and has it cut mid-episode. Two limits stay: that suite runs on the macOS host, so those lines are outside the coverage number the gate prints, and it is not a browser-level smoke of the kind apps/web has at C13 — nothing renders.
 
 ## States are designed, not fallbacks
 
@@ -248,31 +399,81 @@ Every read lands in one union, [LoadState](MaekbeatKit/Sources/MaekbeatKit/ViewS
 
 The not-a-medical-device line is in the interface, not only in [DISCLAIMER.md](../../DISCLAIMER.md). [RootView](MaekbeatKit/Sources/MaekbeatKit/Views/RootView.swift) keeps `DisclaimerBar` above the navigation stack, so it survives every screen and every failed one; a source scan asserts the bar is rendered and that its words still say what they must.
 
-## Tests, and the boundary they hold
+## Test map
 
-| File                                                                                                  | Pins                                                                                                   |
-| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| [BLELinkMatrixTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/BLELinkMatrixTests.swift)               | all 99 state-by-event cells, each asserting the landing state and the exact effect list                |
-| [BLELinkScenarioTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/BLELinkScenarioTests.swift)           | the effects each path emits, connecting vs recovering, backoff growth and reset, stall, radio loss     |
-| [BLEDriverTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/BLEDriverTests.swift)                       | effects becoming radio calls against a mock central, the fake-clock timers, undecodable payloads       |
-| [GattProfileTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/GattProfileTests.swift)                   | the MTU arithmetic, the codec round trip, byte order against hand-written bytes, every rejection       |
-| [CoreBluetoothAdapterTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/CoreBluetoothAdapterTests.swift) | the six radio-state translations, and a real manager reporting `.unsupported` on a simulator           |
-| [UplinkQueueTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/UplinkQueueTests.swift)                   | resume from the last acknowledged seq, reboot handling, the bound, the reorder window                  |
-| [IngestClientTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/IngestClientTests.swift)                 | uplink states, capped backoff, a frame refused when the socket is not live, reply decoding             |
-| [GatewayModelTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/GatewayModelTests.swift)                 | notification in, `/ingest` frame out, acknowledgement back, and the resume across a reconnect          |
-| [GatewayIntegrationTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/GatewayIntegrationTests.swift)     | the same contract against a real apps/server process — macOS host, outside the coverage gate           |
-| [GoldenContractTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/GoldenContractTests.swift)             | the cross-language contract above, plus version, bounds, and missing-field rejection                   |
-| [StreamClientTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/StreamClientTests.swift)                 | state transitions, capped backoff, reconnect, delivery stopping at close, the socket built after close |
-| [APIClientTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/APIClientTests.swift)                       | the four reads, URL building and escaping, the network/http/contract split, socket URL schemes         |
-| [ViewStateTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/ViewStateTests.swift)                       | the union, copy for every variant, the device list's four states, formatting, the state marks          |
-| [DeviceScreenTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/DeviceScreenTests.swift)                 | seed then live append, frame identity, ordering, the bounded window, back-fill, episodes, decisions    |
-| [ViewRenderingTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/ViewRenderingTests.swift)               | every screen in every designed state, through a real layout pass on the simulator                      |
-| [URLSessionSocketTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/URLSessionSocketTests.swift)         | the shipped socket factory against a refused port                                                      |
-| [SourceDisciplineTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/SourceDisciplineTests.swift)         | no radio, no store, the disclaimer rendered, the network in two files, the app shell still a shell     |
+One row per test file, mapping it to the behaviours it pins — the same
+file-to-behaviour table [apps/server/README.md](../server/README.md) carries,
+and the iOS half of the C20 traceability story. Property suites run on fixed
+seeds with fixed iteration counts, so CI is deterministic. The **Runs** column
+matters here in a way it does not for the server: two of these files are behind
+platform guards, and neither command in this package compiles both
+([scripts/scope-notice.sh](scripts/scope-notice.sh) prints which one you just
+ran).
 
-`ViewRenderingTests` is not a snapshot suite and does not claim to be one: nothing compares pixels, and a view that lays out badly still passes. What it proves is that each `body` is evaluated on the platform the app ships on, in each state, without trapping — an index into an empty window, a `ForEach` over non-unique ids. It is also what puts the view files in the coverage denominator honestly; the alternative was a lower threshold and a paragraph explaining why views do not count, which is the exemption the ratchet exists to refuse.
+| File                                                                                                          | Runs      | Pins                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------- | --------- | -------------------------------------------------------------------------------------------------------- |
+| [BLELinkMatrixTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/BLELinkMatrixTests.swift)                       | both      | all 99 state-by-event cells, each asserting the landing state and the exact effect list                  |
+| [BLELinkScenarioTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/BLELinkScenarioTests.swift)                   | both      | the effects each path emits, connecting vs recovering, backoff growth and reset, stall, radio loss       |
+| [BLELinkPropertyTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/BLELinkPropertyTests.swift)                   | both      | 8 seeds × 500 events: no illegal state, no effect outliving its owner, backoff sized by its attempt      |
+| [BLEDriverTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/BLEDriverTests.swift)                               | both      | effects becoming radio calls against a mock central, the fake-clock timers, undecodable payloads         |
+| [GattProfileTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/GattProfileTests.swift)                           | both      | the MTU arithmetic, the codec round trip, byte order against hand-written bytes, every rejection         |
+| [CoreBluetoothAdapterTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/CoreBluetoothAdapterTests.swift)         | both      | the six radio-state translations, and a real manager reporting `.unsupported` on a simulator             |
+| [UplinkQueueTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/UplinkQueueTests.swift)                           | both      | resume from the last acknowledged seq, reboot handling, the bound, the reorder window                    |
+| [IngestClientTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/IngestClientTests.swift)                         | both      | uplink states, capped backoff, a frame refused when the socket is not live, reply decoding               |
+| [GatewayModelTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/GatewayModelTests.swift)                         | both      | notification in, `/ingest` frame out, acknowledgement back, and the resume across a reconnect            |
+| [GoldenContractTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/GoldenContractTests.swift)                     | both      | the cross-language contract above, plus version, bounds, and missing-field rejection                     |
+| [StreamClientTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/StreamClientTests.swift)                         | both      | state transitions, capped backoff, reconnect, delivery stopping at close, the socket built after close   |
+| [APIClientTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/APIClientTests.swift)                               | both      | the four reads, URL building and escaping, the network/http/contract split, socket URL schemes           |
+| [URLSessionSocketTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/URLSessionSocketTests.swift)                 | both      | the two shipped socket factories against a refused port: construction, failure branch, close             |
+| [DefaultPathTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/DefaultPathTests.swift)                           | both      | every injected port taken at its default — the real transport, timer, sockets, driver clock, inert ports |
+| [DefaultValueTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/DefaultValueTests.swift)                         | both      | the shipped queue bound and batch limit, the `ios-gateway` actor, the pre-open connection state          |
+| [NotificationPolicyTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/NotificationPolicyTests.swift)             | both      | one episode one banner, the two suppression reasons, withdrawal on resolve or decision, permission       |
+| [NotificationPropertyTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/NotificationPropertyTests.swift)         | both      | 6 seeds × 400 steps of replay and reconnect: dedupe, closure, and every effect accounted for             |
+| [NotificationCoordinatorTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/NotificationCoordinatorTests.swift)   | both      | the decision round trip, a refused decision leaving the banner, permission read and asked                |
+| [NotificationAdapterTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/NotificationAdapterTests.swift)           | both      | the authorization translation for every framework case, the request and the category as built            |
+| [NotificationCopyTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/NotificationCopyTests.swift)                 | both      | the banned-word list over the notification body — what an alert may not say on a lock screen             |
+| [NotificationWiringTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/NotificationWiringTests.swift)             | both      | socket alerts, REST seeds and decisions all reaching the centre through the policy rather than around it |
+| [ViewStateTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/ViewStateTests.swift)                               | both      | the union, copy for every variant, the device list's four states, formatting, the state marks            |
+| [DeviceScreenTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/DeviceScreenTests.swift)                         | both      | seed then live append, frame identity, ordering, the bounded window, back-fill, episodes, decisions      |
+| [SourceDisciplineTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/SourceDisciplineTests.swift)                 | both      | no radio, no store, the disclaimer rendered, the network in three files, the app shell still a shell     |
+| [NotificationDisciplineTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/NotificationDisciplineTests.swift)     | both      | no APNs, no device token, no push server, and UserNotifications in its own adapter alone                 |
+| [ViewRenderingTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/ViewRenderingTests.swift)                       | simulator | every screen in every designed state through a real layout pass, and the production screen initialiser   |
+| [CompositionTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/CompositionTests.swift)                           | simulator | the screens running their own `.task`: the gateway started, the centre prepared, the permission re-read  |
+| [GatewayIntegrationTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/GatewayIntegrationTests.swift)             | macOS     | the resume contract and the decision circuit against a real apps/server process                          |
+| [ServerFailureIntegrationTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/ServerFailureIntegrationTests.swift) | macOS     | a dead server, a refused decision, a socket cut mid-episode, an alert raised during the outage, denial   |
 
-What is **not** covered: no view's layout, spacing, or contrast is asserted, no screen reader has read this interface, and there is no accessibility audit of the kind apps/web ran at C12 — VoiceOver rotor order, dynamic type at accessibility sizes, and target size in points are all unmeasured here. The controls carry accessible labels and a 44x44 minimum by declaration, which is a design intent rather than a measurement.
+**What remains verifiable only on physical hardware:** scanning, discovery,
+connection, subscription and notification delivery over a real radio; iOS
+relaunching a terminated app into a restored central; throughput, latency, range
+and battery; the permission prompt and what a person answers; a banner appearing
+and its buttons working from the lock screen; delivery while backgrounded,
+suspended or terminated; and every instance method on
+`UserNotificationCenterAdapter`, which no gate here can call at all. The two
+tables above — one per commit — list those row by row alongside the procedure
+someone with a device would follow.
+
+`ViewRenderingTests` is not a snapshot suite and does not claim to be one:
+nothing compares pixels, and a view that lays out badly still passes. What it
+proves is that each `body` is evaluated on the platform the app ships on, in each
+state, without trapping — an index into an empty window, a `ForEach` over
+non-unique ids. It is also what puts the view files in the coverage denominator
+honestly; the alternative was a lower threshold and a paragraph explaining why
+views do not count, which is the exemption the ratchet exists to refuse.
+
+`CompositionTests` is its opposite number and the two are kept apart
+deliberately. Rendering evaluates bodies and must not reach a server;
+composition makes the window key so the `.task` modifiers really fire, and its
+gateway is the injected one for the same reason.
+
+What is **not** covered: no view's layout, spacing, or contrast is asserted, no
+screen reader has read this interface, and there is no accessibility audit of the
+kind apps/web ran at C12 — VoiceOver rotor order, dynamic type at accessibility
+sizes, and target size in points are all unmeasured here. The controls carry
+accessible labels and a 44x44 minimum by declaration, which is a design intent
+rather than a measurement. Notification authorization is read at launch and on
+every appearance of the link screen, and not on foregrounding: picking up a
+change made in Settings while the app is away would need a `scenePhase` observer
+that no gate here can drive, so it is a stated limit rather than a claim.
 
 ## The gate, and why it exists at all
 
@@ -291,7 +492,9 @@ The `ios` job in [.github/workflows/ci.yml](../../.github/workflows/ci.yml) runs
 
 ### The ratchet, and how it differs from the others
 
-The threshold is **89% line coverage on the `MaekbeatKit` target**. It was set at C14 just under a measured 91.37%; C15 measures **91.71% (1782/1943 lines)** — Xcode 26.6, iOS 26.5 simulator, 2026-08-06 — with the CoreBluetooth adapter's untestable half counted against it. The threshold does not move here: a raise is its own deliberate commit ([CLAUDE.md](../../CLAUDE.md)), and C15 is not that commit. It moves only up, in its own deliberate commit, and never by excluding a file ([CLAUDE.md](../../CLAUDE.md)).
+The threshold is **91% line coverage on the `MaekbeatKit` target**, raised at C17 from the 89 C14 set. Every measurement so far, each on the method above: C14 measured 91.37%, C15 measured 91.71% (1782/1943 lines), C16 measured 91.36% (2137/2339), and C17 measures **93.80% (2239/2387)** — Xcode 26.6, iOS 26.5 simulator, 2026-08-06 — with the CoreBluetooth and UserNotifications adapters' untestable halves counted against it.
+
+C17 raises it because C17 is the commit that earned it: the number moved because defaults that had no caller got one, not because a number was chased. C15 and C16 left it alone for the same rule in reverse — a raise is its own deliberate commit ([CLAUDE.md](../../CLAUDE.md)), and a feature commit is not that commit. It moves only up, and never by excluding a file.
 
 Two differences from the TypeScript packages, both stated rather than smoothed over:
 

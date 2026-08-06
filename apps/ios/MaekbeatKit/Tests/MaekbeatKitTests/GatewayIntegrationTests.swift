@@ -25,8 +25,11 @@ import XCTest
 @MainActor
 final class GatewayIntegrationTests: XCTestCase {
     private var server: ServerProcess?
+    private var rig: Rig?
 
     override func tearDownWithError() throws {
+        rig?.stop()
+        rig = nil
         server?.stop()
         server = nil
         try super.tearDownWithError()
@@ -201,9 +204,10 @@ final class GatewayIntegrationTests: XCTestCase {
     private func start() async throws -> Rig {
         let process = try ServerProcess.launch()
         server = process
-        let rig = Rig(port: process.port)
-        await rig.open()
-        return rig
+        let started = Rig(port: process.port)
+        rig = started
+        await started.open()
+        return started
     }
 }
 #endif

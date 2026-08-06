@@ -83,8 +83,17 @@ public struct BLELinkMachine: Equatable, Sendable {
     private mutating func applyConnecting(_ event: LinkEvent) -> Outcome {
         switch event {
         case .peripheralConnected:
+            // `cancelRetry` because `connecting` is two situations wearing one
+            // name: trying now, and waiting to try again after a failure. A
+            // connect that lands in the second — the radio completing a connect
+            // the machine had already given up on — leaves the backoff timer
+            // running, and it later delivers `retryDue` into `connected`, where
+            // the machine rejects it and the link screen counts an unexpected
+            // radio event the radio never produced. Found by the seeded property
+            // run in BLELinkPropertyTests, seed 1, step 435.
             return move(to: .connected(hasStreamed: state.hasStreamed), [
-                .discoverServices, .armTimeout(afterMs: LinkTiming.discoveryTimeoutMs)
+                .cancelRetry, .discoverServices,
+                .armTimeout(afterMs: LinkTiming.discoveryTimeoutMs)
             ])
         case .timeout, .linkLost:
             return failAttempt(cancelling: event == .timeout)

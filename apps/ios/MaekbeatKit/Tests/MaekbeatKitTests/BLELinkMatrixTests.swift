@@ -82,8 +82,13 @@ final class BLELinkMatrixTests: XCTestCase {
             "radioUnavailable": .moves(
                 to: .disconnected(hasStreamed: hasStreamed, wantsLink: true), effects: teardown
             ),
+            // `cancelRetry` because a failed attempt lands back in `connecting`
+            // with a backoff pending, and a connect that then completes has to
+            // take that timer with it — C17's property run found it firing
+            // `retryDue` into `connected` several transitions later.
             "peripheralConnected": .moves(
-                to: .connected(hasStreamed: hasStreamed), effects: [.discoverServices, discoverArm]
+                to: .connected(hasStreamed: hasStreamed),
+                effects: [.cancelRetry, .discoverServices, discoverArm]
             ),
             "servicesResolved": .rejected,
             "notificationsEnabled": .rejected,

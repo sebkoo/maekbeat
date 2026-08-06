@@ -580,3 +580,101 @@ twice, and it happened again here in the other direction: the integration test
 also found the `ongoing` hole described in apps/ios/README.md, which every test in
 `NotificationPolicyTests` had agreed about. A suite can only test what it assumes the
 other side says.
+
+## C17 — closing the iOS seams
+
+Seventeen mutations of a guard, each verified to have taken effect before its
+result was read, and every one caught. Beside them: two defects the new suites
+found on their own first run — recorded here because a test that catches a real
+bug is a stronger proof than one that survives a synthetic one — and one block
+of NOT CAUGHT results that is a claim about the code rather than about the
+suite, worked through the branches in [AI_USAGE.md](AI_USAGE.md) rather than
+flattened into a row.
+
+### Mutations of the guards
+
+| Guard                                     | Own mutation                                        | Neighbour mutation                        | Result |
+| ----------------------------------------- | --------------------------------------------------- | ----------------------------------------- | ------ |
+| the root screen starts the gateway        | delete `gateway.start()` from `RootView`'s task     | the centre is still prepared              | caught |
+| the root screen prepares the centre       | delete `notifications.prepare()` from the same task | the gateway is still started              | caught |
+| the link screen re-reads the permission   | delete its `.task`                                  | the launch read still lands               | caught |
+| the device list reads from its own task   | delete `.task { await model.load() }`               | the other screens are unaffected          | caught |
+| the device screen closes its socket       | delete `.onDisappear { model.disconnect() }`        | the open on appearance still fires        | caught |
+| no effect outlives its owner (driver)     | drop `cancelRetry` from connecting → connected      | the ledger property fails too             | caught |
+| no effect outlives its owner (ledger)     | the same mutation                                   | the well-definedness property is unmoved  | caught |
+| a rejected event changes nothing          | increment `attempt` on the rejected branch          | —                                         | caught |
+| one episode, one banner, ever             | never record an episode as notified                 | the denied-permission property is unmoved | caught |
+| every effect is accounted for             | stop counting `notANewEpisode` suppressions         | —                                         | caught |
+| a refused permission schedules nothing    | drop the authorization guard from the policy        | —                                         | caught |
+| the back-fill re-reads the alert history  | delete the alerts read from `backfill()`            | the frames back-fill is unaffected        | caught |
+| a dead server reads as disconnected       | make `.network` report `isDisconnected` false       | the http and contract splits are unmoved  | caught |
+| a refused decision leaves the banner      | withdraw before the server answers                  | a successful decision still withdraws     | caught |
+| the default HTTP transport is a real one  | resolve it to a closure returning a canned response | —                                         | caught |
+| the default scheduler is the real timer   | resolve it to a no-op scheduler                     | —                                         | caught |
+| the default scheduler's canceller cancels | return a no-op canceller instead of `work.cancel()` | —                                         | caught |
+
+Rows six and seven are one mutation read twice, and worth separating because the
+two tests fail at different distances from the fault. The ledger property fails
+48 times — it is bookkeeping over the effect lists, so it objects the moment
+`connected` is reached with a retry still pending. The driver property fails
+3613 times, because it only notices when the orphaned timer actually fires, and
+then keeps noticing for the rest of the run. The first localises the fault; the
+second is the one that resembles what a caregiver would see.
+
+### Two defects the suites found unprompted
+
+Neither is a mutation. Both are recorded because the point of the discipline is
+to catch things nobody thought to break.
+
+**A retry that outlived its state.** `BLELinkPropertyTests` failed on its first
+run at seed 1, step 435, with "a timer fired into `connected`, which never armed
+it". `connecting` is two situations under one name — trying now, and waiting out
+a backoff after a failed attempt — and a connect that landed in the second left
+the retry running. It later delivered `retryDue` into `connected`, where the
+machine rejected it and `BLEDriver.rejectedEvents` went up, putting an
+"unexpected radio event" on the link screen that the radio had not produced. The
+counter exists to mean "the radio did something this model says is impossible";
+the model was what did it. Fixed in `BLELinkMachine.applyConnecting`, with the
+matrix cell and the connect-path scenario moved with it.
+
+**An alert raised into an outage.** `ServerFailureIntegrationTests` cut the
+fan-out socket, raised a real alert on the real engine while it was down, and
+waited for the caregiver to hear about it. Nothing came:
+`DeviceDetailModel.backfill()` re-read frames and not alerts, so the episode had
+no fan-out message and nothing ever asked for it again. The chart healed across
+the gap and the alarm did not exist. "Silence is not continuity" was written
+about frames at C11 and is truer about alerts.
+
+Both had passed C15 and C16 unnoticed, including their adversarial passes.
+
+### NOT CAUGHT, and what that means here
+
+Five `??` fallbacks survive mutation on both platforms. Step 1 first: each
+mutation was confirmed present in the source and both suites rebuilt and ran —
+262 tests on the macOS host, 269 on the simulator, all green with
+`?? window.count` turned into `?? -1` (which would trap on an insert) and four
+`APIClient` fallbacks turned into sentinels that would show in a URL.
+
+| Fallback                                      | Why nothing observes it                                                                                        |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `DeviceDetailModel.merge` `?? window.count`   | the guard above it establishes `frame.capturedAtMs < last.capturedAtMs`, so `firstIndex` finds `last` at worst |
+| `APIClient.escape` `?? segment`               | `addingPercentEncoding` returns nil only for a string Swift cannot hold                                        |
+| `APIClient.makeURL` `?? ""`                   | `URLComponents(url:resolvingAgainstBaseURL:)` returns nil only for a URL Foundation would not have built       |
+| `APIClient.webSocketURL` `?? baseURL` (twice) | the same, plus a `components.url` that cannot fail once the components parsed                                  |
+
+Branch (a) does not apply: nothing observable changes. Branch (b) has no named
+threat beyond "Foundation's contract changes". Branch (c) says delete — and here
+it is refused deliberately, because deleting an unreachable `??` in Swift means a
+force unwrap, and trading an unreachable branch for a reachable crash in a 1 Hz
+path on a monitoring screen is the wrong direction. They are recorded as
+unreachable by construction rather than as untested, which is the distinction
+this section exists to keep.
+
+### One test-support bug, found by volume
+
+`FakeTransport`'s scheduler cancelled a pending timer by array index, and
+`fireScheduled()` empties that array — so a canceller held from before a firing
+zeroed whichever timer had since taken slot 0. A spent canceller silently
+killing a live deadline can only ever turn a red into a green. No existing test
+was wrong because of it; the property suite, which cancels and fires hundreds of
+times in one run, is what made it matter. Now keyed by ticket.

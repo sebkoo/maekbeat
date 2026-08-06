@@ -98,5 +98,9 @@ public struct LinkStatusView: View {
             }
         }
         .navigationTitle(Copy.linkSectionTitle)
+        // Re-read on every appearance of the screen that renders it. The user
+        // can grant or revoke in Settings while this tab is not showing, and a
+        // permission row read once at launch is a row that goes quietly wrong.
+        .task { await notifications?.refreshAuthorization() }
     }
 }

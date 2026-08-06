@@ -89,6 +89,27 @@ public final class DeviceDetailModel {
             // A failed back-fill leaves the window as it was: stale is visible
             // (the newest frame's timestamp is on screen), invented is not.
         }
+
+        // The alert history too, and this half was missing until C17. A socket
+        // that was down for forty seconds missed whatever the engine raised in
+        // them: the fan-out message went nowhere, and nothing asked again until
+        // the screen was rebuilt — so an episode that opened during an outage
+        // reached no caregiver at all. Found by the socket-drop test in
+        // apps/ios/MaekbeatKit/Tests/MaekbeatKitTests/ServerFailureIntegrationTests.swift.
+        //
+        // Re-offering episodes this phone has already seen is safe by
+        // construction: NotificationPolicy keys on `alertId` and refuses a
+        // repeat, which is the whole reason it is a policy rather than a branch.
+        do {
+            let page = try await client.alerts(deviceId: deviceId)
+            for alert in page.alerts { mergeAlert(alert) }
+            for event in page.decisions { apply(event) }
+            for alert in page.alerts {
+                notifications?.handle(alert, decided: decisions[alert.alertId] != nil)
+            }
+        } catch {
+            // Same rule as above: the timeline stays as it was.
+        }
     }
 
     // MARK: - Stream

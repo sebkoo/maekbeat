@@ -139,25 +139,43 @@ final class DeviceScreenTests: XCTestCase {
         model.connect()
         transport.latest?.open()
 
-        stub.answers = [(
-            Wire.framesPage([
-                Wire.frame(seq: 1, capturedAtMs: 1_001_000),
-                Wire.frame(seq: 2, capturedAtMs: 1_002_000)
-            ]),
-            200
-        )]
+        stub.answers = [
+            (
+                Wire.framesPage([
+                    Wire.frame(seq: 1, capturedAtMs: 1_001_000),
+                    Wire.frame(seq: 2, capturedAtMs: 1_002_000)
+                ]),
+                200
+            ),
+            (Wire.emptyAlertsPage, 200)
+        ]
         transport.latest?.drop()
         transport.fireScheduled()
         transport.latest?.open()
 
-        // The back-fill is a task; let it land.
-        try await Task.sleep(nanoseconds: 50_000_000)
+        // The back-fill is a task. Waited for by its result rather than by the
+        // clock — a fixed sleep is how apps/server's fan-out test spent three
+        // commits failing on load rather than on behaviour (docs/ai/AI_USAGE.md).
+        for _ in 0..<100 {
+            if model.frames.value?.count == 3 { break }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
 
         XCTAssertEqual(model.frames.value?.map(\.seq), [0, 1, 2])
-        let backfillURL = try XCTUnwrap(stub.requested.last)
+        let framesReads = stub.requested.filter { $0.path.hasSuffix("/frames") }
+        let backfillURL = try XCTUnwrap(framesReads.last)
         XCTAssertTrue(
             backfillURL.absoluteString.contains("since=1000000"),
             "the back-fill must resume from the newest frame held: \(backfillURL)"
+        )
+        // And the alert history with it: an episode that opened while the socket
+        // was down produced no fan-out message, so this read is the only thing
+        // that would ever find it (C17, ServerFailureIntegrationTests).
+        let alertReads = stub.requested.filter { $0.path.hasSuffix("/alerts") }.count
+        XCTAssertEqual(
+            alertReads,
+            2,
+            "a re-open must ask what alerts it missed, not only what frames it missed"
         )
         model.disconnect()
     }

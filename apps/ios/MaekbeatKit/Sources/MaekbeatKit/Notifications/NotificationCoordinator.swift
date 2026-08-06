@@ -51,9 +51,9 @@ public final class NotificationCoordinator {
         return NotificationCoordinator(port: port, client: APIClient(baseURL: baseURL))
     }
 
-    /// Registers the actions and reads the current permission. Called on every
-    /// appearance, not once: the user can change their mind in Settings while
-    /// the app is away, and the screen has to stop claiming coverage it lost.
+    /// Registers the actions and reads the current permission, once per launch,
+    /// from `RootView`. The re-read as the user changes their mind is
+    /// `refreshAuthorization()`, which the link screen calls on appearance.
     ///
     /// It does not ask. A prompt fired at launch is a prompt asked before the
     /// user has seen what it is for, and a refusal is permanent — the interface
@@ -63,9 +63,15 @@ public final class NotificationCoordinator {
         await refreshAuthorization()
     }
 
-    /// Reads the current authorization without asking for it. Called whenever
-    /// the app comes back, because the user can revoke in Settings and the app
-    /// would otherwise keep claiming coverage it no longer has.
+    /// Reads the current authorization without asking for it, because the user
+    /// can revoke in Settings and the app would otherwise keep claiming coverage
+    /// it no longer has.
+    ///
+    /// Called at launch by `RootView` and on every appearance of the screen that
+    /// renders the permission row, `LinkStatusView`. Not on foregrounding: that
+    /// would need a `scenePhase` observer, which no gate here can drive, so the
+    /// limit is stated in apps/ios/README.md rather than implied away by a
+    /// comment claiming more than the code does.
     public func refreshAuthorization() async {
         authorization = await port.currentAuthorization()
     }

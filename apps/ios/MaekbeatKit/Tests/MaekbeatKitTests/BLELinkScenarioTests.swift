@@ -25,8 +25,12 @@ final class BLELinkScenarioTests: XCTestCase {
         XCTAssertEqual(effects(machine.apply(.start)), [
             .cancelRetry, .scanAndConnect, .armTimeout(afterMs: LinkTiming.connectTimeoutMs)
         ])
+        // `cancelRetry` on a first connect is a no-op, and it is there for the
+        // connect that is not a first one: `connecting` is also where a failed
+        // attempt waits out its backoff, and a connect landing there has to take
+        // that timer with it (C17, BLELinkPropertyTests).
         XCTAssertEqual(effects(machine.apply(.peripheralConnected)), [
-            .discoverServices, .armTimeout(afterMs: LinkTiming.discoveryTimeoutMs)
+            .cancelRetry, .discoverServices, .armTimeout(afterMs: LinkTiming.discoveryTimeoutMs)
         ])
         XCTAssertEqual(effects(machine.apply(.servicesResolved)), [
             .enableNotifications, .armTimeout(afterMs: LinkTiming.discoveryTimeoutMs)

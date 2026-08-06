@@ -175,6 +175,14 @@ final class Rig {
         socketsProvider = { made }
     }
 
+    /// Closes both legs. Without it the uplink client keeps retrying against a
+    /// port the test has already killed, and a later test that is handed the
+    /// same ephemeral port by the OS would find a stranger's frames in its
+    /// server — the kind of cross-test contamination that reads as a flake.
+    func stop() {
+        model.stop()
+    }
+
     /// Separate from `init` because it awaits: a Swift initialiser cannot.
     func open() async {
         await wait(until: { self.model.uplink == .live }, "the uplink to open")
@@ -217,6 +225,22 @@ final class Rig {
     /// replay the resume rule exists to prevent.
     func resendRaw(_ range: ClosedRange<Int>) {
         for seq in range { ingest.send(frame(seq)) }
+    }
+
+    /// More frames on whatever seq line this rig is already on, at a reading the
+    /// caller chooses. `raiseRealAlert` leaves the counter somewhere the caller
+    /// cannot know, and a fixed range after it would collide with frames the
+    /// server has filed — which the gateway would refuse before the server ever
+    /// saw them, so the test would wait for data that was never sent.
+    ///
+    /// The reading matters as much as the seq: `spo2Pct` below 90 keeps the C7
+    /// episode breaching, and the default keeps it resolving, so a test says
+    /// which one it wants rather than discovering it.
+    func streamMoreFrames(count: Int, spo2: Double = 97.5) {
+        let start = (model.queue.highestOfferedSeq ?? -1) + 1
+        for seq in start..<(start + count) {
+            driver.receive(payload: GattProfile.encode(frame(seq, spo2: spo2)), from: "sim-001")
+        }
     }
 
     func dropTheSocket() async {
@@ -272,13 +296,13 @@ final class Rig {
         return lines.compactMap { try? VitalsDecoder.frame(from: $0) }
     }
 
-    private func frame(_ seq: Int) -> VitalsFrame {
+    private func frame(_ seq: Int, spo2: Double = 97.5) -> VitalsFrame {
         VitalsFrame(
             deviceId: "sim-001",
             seq: seq,
             capturedAtMs: 1_754_265_600_000 + seq * 1_000,
             heartRateBpm: 62,
-            spo2Pct: 97.5,
+            spo2Pct: spo2,
             respirationRpm: 13.7,
             motion: 0.01
         )

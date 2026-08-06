@@ -26,16 +26,22 @@
 set -euo pipefail
 
 # Ratchet, not aspiration (CLAUDE.md). Raised only in its own deliberate commit,
-# never lowered, never widened by excluding a file. Set at C14 just under a
-# measured 91.37% (Xcode 26.6, iOS 26.5 simulator, 2026-08-05 — the measurement
-# and its method are in apps/ios/README.md), the same headroom convention the
-# vitest packages use.
+# never lowered, never widened by excluding a file. Set at C14 to 89 under a
+# measured 91.37%; raised at C17 to 91 under a measured 93.80% (2239/2387,
+# Xcode 26.6, iOS 26.5 simulator, 2026-08-06 — the measurement and its method
+# are in apps/ios/README.md), the same headroom convention the vitest packages
+# use: apps/server sits at 90 under 92.88.
+#
+# The raise is C17's to make because C17 is the commit that earned it — the
+# coverage moved because defaults that had no caller got one, not because a
+# number was chased. What is still uncovered is tabulated in apps/ios/README.md
+# rather than left for a reader to infer from the gap.
 #
 # Hard-coded, with no environment override, because CLAUDE.md forbids lowering a
 # threshold by a flag and an override that exists is an override CI can be given.
 # Proving the gate bites means editing this line and reverting it, exactly as the
 # vitest packages are proved by editing their configs.
-THRESHOLD=89
+THRESHOLD=91
 TARGET=MaekbeatKit
 
 result=${1:-}

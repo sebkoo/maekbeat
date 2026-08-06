@@ -304,6 +304,19 @@ final class ViewRenderingTests: XCTestCase {
         model.disconnect()
     }
 
+    /// The initialiser the device list pushes, which builds its own model with
+    /// the real socket behind it. Every other render here uses the injectable
+    /// one — a model already wired to a fake — so until C17 this entry point had
+    /// no caller but the app itself.
+    ///
+    /// Rendered without a key window, like everything else in this file, which
+    /// is what keeps the `.task` that would open that real socket from running.
+    /// `CompositionTests` is where tasks are allowed to fire, and it uses the
+    /// injectable initialiser for exactly that reason.
+    func testTheProductionDeviceScreenInitialiserBuildsItsOwnModel() {
+        render(DeviceDetailView(deviceId: "sim-001", client: StubHTTP().client))
+    }
+
     /// Both models take the fake socket. `DeviceDetailView` connects from its
     /// own `.task`, and a hosted view really does run it — a render test that
     /// left the default transport in place would open a live WebSocket to

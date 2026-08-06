@@ -38,6 +38,16 @@ public struct RootView: View {
                 }
             }
         }
-        .task { await notifications.prepare() }
+        // The gateway is started here because nothing else would. Holding it and
+        // rendering it is not running it: until C17 this view took a
+        // `GatewayModel`, showed its state, and never called `start()`, so the
+        // shipped app opened no `/ingest` socket and began no scan while every
+        // gateway test passed — each of them calls `start()` itself. The same
+        // class as apps/server's unwired retention at C12a, and the reason
+        // CompositionTests drives this screen rather than reading it.
+        .task {
+            gateway.start()
+            await notifications.prepare()
+        }
     }
 }
