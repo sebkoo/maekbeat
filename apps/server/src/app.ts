@@ -119,7 +119,11 @@ export async function buildApp(config: ServerConfig, options: BuildAppOptions = 
     now: options.now,
   });
   await app.register(readsPlugin, { store, engine, counters, decisions, broadcaster });
-  await app.register(streamPlugin, { broadcaster, ringCapacity: config.RING_CAPACITY });
+  await app.register(streamPlugin, {
+    broadcaster,
+    ringCapacity: config.RING_CAPACITY,
+    heartbeatMs: config.STREAM_HEARTBEAT_MS,
+  });
 
   app.get(
     "/healthz",

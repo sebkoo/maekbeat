@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { STREAM_HEARTBEAT_MS_DEFAULT } from "./stream";
+
 /**
  * Environment contract for the server. Unknown variables are ignored, missing
  * ones fall back to the defaults below, and invalid values fail startup with
@@ -21,6 +23,24 @@ const envSchema = z.object({
    * (README, "Declared limits"); a deployment with real origins sets the list.
    */
   CORS_ORIGIN: z.string().trim().min(1).default("*"),
+  /**
+   * Maximum silence on a dashboard fan-out socket before the server sends a
+   * WebSocket ping (src/stream.ts). Configurable because the value that
+   * matters is a property of whatever sits between the server and the browser
+   * rather than of the server, and every deployment has a different one; the
+   * default assumes the 60-second idle timeout that both AWS load balancers
+   * and nginx ship with. The ceiling is 300 s because a keepalive slower than
+   * that beats no intermediary default this repository knows of, and the
+   * floor is 1 s because zero would mean a ping per event-loop turn rather
+   * than "off" — there is no off, since a fan-out socket with no keepalive is
+   * the bug this variable exists to prevent.
+   */
+  STREAM_HEARTBEAT_MS: z.coerce
+    .number()
+    .int()
+    .min(1_000)
+    .max(300_000)
+    .default(STREAM_HEARTBEAT_MS_DEFAULT),
   /**
    * OTLP/HTTP traces endpoint. Its presence is the entire on switch: unset,
    * the server builds no exporter, no span processor and no batch timer, and

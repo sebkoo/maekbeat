@@ -113,16 +113,50 @@ export const STREAM_MAX_BUFFERED_BYTES = 256 * 1024;
  */
 export const STREAM_SLOW_SUBSCRIBER_CLOSE = 1013;
 
+/**
+ * How long a fan-out socket may stay silent before the server pings it.
+ *
+ * This is a WebSocket control frame, not a protocol message, and the
+ * distinction is the whole design. `streamMessageSchema` is a strict union of
+ * `ready`, `frame`, `alert` and `decision` — packages/protocol/src/stream.test.ts
+ * asserts that `{type:"heartbeat"}` is rejected — so a keepalive invented at
+ * the application layer would be a fourth message every client had to learn,
+ * including apps/ios, and would break both of them the day it shipped. A ping
+ * is answered by the browser's WebSocket implementation, by `ws` and by
+ * `URLSessionWebSocketTask` without any of them being told, and it is invisible
+ * to every `onmessage` handler in this repository.
+ *
+ * Why a fan-out socket needs one at all, and why /ingest does not: a dashboard
+ * watching a device that has stopped sending receives nothing, indefinitely.
+ * That is the ordinary case rather than the broken one — device disconnect is
+ * the first failure mode in docs/ARCHITECTURE.md — and a socket carrying no
+ * bytes is what every intermediary between the two ends calls dead. An AWS
+ * load balancer's idle timeout defaults to 60 seconds and nginx's
+ * `proxy_read_timeout` to the same, so an idle dashboard loses its connection
+ * on a timer and reconnects on the next one, forever. The ingest socket is
+ * driven by a device that is either sending or genuinely gone.
+ *
+ * 25 seconds, so that two pings fit inside the smallest of those defaults and
+ * one lost ping does not close a healthy connection. It is the server's stated
+ * maximum silence on a /stream socket, which is the number any proxy in front
+ * of this server has to beat — infra/cdk asserts exactly that against the load
+ * balancer it synthesizes, reading this value rather than restating it.
+ */
+export const STREAM_HEARTBEAT_MS_DEFAULT = 25_000;
+
 export interface StreamPluginOptions {
   broadcaster: DeviceBroadcaster;
   /** Frames the store keeps per device; sent in `ready` so a client knows the
    *  largest window a reconnect could possibly recover. */
   ringCapacity: number;
+  /** Silence allowed on a subscriber socket before a ping; see
+   *  STREAM_HEARTBEAT_MS_DEFAULT for the number and the reasoning. */
+  heartbeatMs: number;
 }
 
 /** WS fan-out at GET /devices/:deviceId/stream. */
 export const streamPlugin: FastifyPluginAsync<StreamPluginOptions> = async (app, opts) => {
-  const { broadcaster, ringCapacity } = opts;
+  const { broadcaster, ringCapacity, heartbeatMs } = opts;
 
   app.route<{ Params: { deviceId: string } }>({
     method: "GET",
@@ -177,6 +211,39 @@ export const streamPlugin: FastifyPluginAsync<StreamPluginOptions> = async (app,
       let unsubscribe: (() => void) | undefined;
 
       /**
+       * Deliberately not `unref()`d.
+       *
+       * An unref'd timer cannot hold the event loop open, which sounds like
+       * the safe choice and would cost the only test that can see this timer
+       * at all. src/lifecycle.ts is explicit about what it buys — "a ref'd
+       * handle left by anything else, a stray interval, an unclosed server,
+       * hangs the stop visibly rather than being papered over by an
+       * unconditional exit" — so a heartbeat that outlived its socket would
+       * turn a clean SIGTERM into a hung process, which is a failure with a
+       * test rather than a leak without one. The correctness requirement is
+       * therefore that `stop` runs on every path out of this socket, and
+       * src/stream.heartbeat.test.ts spawns a real server and asserts it
+       * still exits.
+       *
+       * There is no `readyState` check around the ping, and that is checked
+       * rather than assumed. One was written here first, on the theory that
+       * pinging a CLOSING socket raises; it does not. `ws` routes a ping off
+       * OPEN into `sendAfterClose`, which with no payload and no callback
+       * increments nothing, emits nothing and throws nothing — verified
+       * against ws 8.18 with a peer that ignores its close frame. A guard no
+       * test can tell from its absence is noise, so it was deleted instead of
+       * kept for appearances. CONNECTING is the one state that does raise, and
+       * this interval is armed inside `wsHandler`, after the upgrade.
+       */
+      const heartbeat = setInterval(() => socket.ping(), heartbeatMs);
+
+      /** Every exit from this socket runs through here; see `heartbeat`. */
+      const stop = () => {
+        clearInterval(heartbeat);
+        unsubscribe?.();
+      };
+
+      /**
        * Publish one message, unless this subscriber is already too far behind.
        *
        * The check is before the write rather than after it, so the queue
@@ -194,7 +261,7 @@ export const streamPlugin: FastifyPluginAsync<StreamPluginOptions> = async (app,
         if (socket.bufferedAmount > STREAM_MAX_BUFFERED_BYTES) {
           dropped = true;
           broadcaster.stats.slowSubscribersDropped += 1;
-          unsubscribe?.();
+          stop();
           // At warn: a caregiver dashboard that cannot keep up is an
           // operational fact, and the C11 version of this was memory growth
           // that nothing counted and nothing said anything about.
@@ -219,7 +286,7 @@ export const streamPlugin: FastifyPluginAsync<StreamPluginOptions> = async (app,
       request.log.info({ deviceId }, "stream subscriber attached");
 
       socket.on("close", () => {
-        unsubscribe?.();
+        stop();
         request.log.info({ deviceId }, "stream subscriber detached");
       });
     },

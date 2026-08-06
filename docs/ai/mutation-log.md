@@ -1004,3 +1004,45 @@ The arm added for it does not claim a coverage number the load rig does not
 produce (docs/DECISIONS.md #24). It asserts reachability instead: every `.js` in
 `infra/k6/` must be invoked by `infra/load.sh`, anchored to the `run_k6 <name>
 <file>` call so that a mention in a comment does not satisfy it.
+
+## C19 — the keepalive on an idle fan-out socket
+
+| Guard                              | Mutation                                                    | Result     |
+| ---------------------------------- | ----------------------------------------------------------- | ---------- |
+| an idle subscriber is pinged       | make the interval body a no-op                              | caught     |
+| the ping is not a protocol message | (positive control — the message count assertion, unmutated) | n/a        |
+| the timer dies with its socket     | remove `clearInterval` from `stop()`                        | caught     |
+| the timer dies with its socket     | remove `clearInterval` **and** `unref()` the interval       | NOT CAUGHT |
+| the timer dies with its socket     | drop-path `stop()` reverted to `unsubscribe?.()` alone      | NOT CAUGHT |
+
+The first two are ordinary. The second failed by hanging rather than by
+asserting: with the `clearInterval` gone the interval keeps firing after its
+socket is gone, the event loop never drains, `src/main.ts` never reaches an exit
+because it calls no `process.exit` on the successful path, and the test dies on
+its own 30-second timeout. That is the shape src/lifecycle.ts predicted in
+prose — "a ref'd handle left by anything else, a stray interval, an unclosed
+server, hangs the stop visibly" — met by an actual stray interval for the first
+time.
+
+The third is the reason the interval is not `unref()`d, and it is a design
+decision rather than an oversight. Adding `.unref()` on top of the same leak
+turns all four tests green: an unref'd handle never holds the loop open, so the
+process exits on time with a timer still firing behind it. **The safe-looking
+call is the one that would have made the leak unobservable.** The cost is
+stated: nothing here bounds how long a leaked heartbeat would run in a process
+that is not being stopped.
+
+The fourth is honest about a line no test can distinguish. Clearing the timer in
+the slow-subscriber drop path shortens the window between `socket.close()` and
+the `close` event — up to thirty seconds when the peer ignores its close frame —
+but the `close` handler is the real owner and fires either way, so nothing
+observable changes. It is kept because one exit function is simpler than two
+different cleanups, not because a test demands it.
+
+A guard written first and deleted before commit belongs here too. The ping was
+wrapped in a `readyState === OPEN` check on the theory that `ws` raises when
+pinging a closing socket. It does not: with no payload and no callback the call
+routes into `sendAfterClose`, which increments nothing and emits nothing —
+checked against a real `ws` peer that ignores its close frame rather than
+reasoned about. The check was removed, on the C19 precedent that a guard nobody
+can construct a failure for is decoration.
