@@ -844,3 +844,63 @@ than the whole context, so no `.git` can reach an image whether the line is
 there or not. The line stays for build speed, and the image assertion that
 there is no `.git` stays as a check on the copies, but neither is evidence
 about the other.
+
+## C19 — what only load reaches
+
+Three behaviours here are invisible to a suite that drives a handful of frames,
+and two of them had already failed once. C18's stop inversion is the clearest:
+a clean stop exited non-zero only when the server had carried enough traffic to
+buffer spans, so the servers doing their job were the ones failing their stop,
+and no idle test could have seen it. The others are alert timing under a busy
+event loop — receive times bunch, and the whole engine runs on receive time —
+and dedupe across parallel streams, where a retransmit re-counted into a window
+is a second alert for a caregiver rather than a duplicate row.
+
+The guards are in `src/load.test.ts`. Each mutation below had to fail its own
+target and leave its neighbours green.
+
+| Guard                                     | Mutation                                          | Result |
+| ----------------------------------------- | ------------------------------------------------- | ------ |
+| a stop after traffic flushes what it held | delete the flush from `shutdown`                  | caught |
+| a refused flush does not decide the exit  | delete the flush from `shutdown`                  | caught |
+| alerts land on the same frames under load | widen the spo2-low hysteresis to 92/95            | caught |
+| dedupe holds across parallel streams      | `false &&` the `seenSeqs` check in `store.ingest` | caught |
+
+The differential is not self-sufficient, and finding out why is the useful
+part. The load run's oracle is the quiet run — the same fixture, the same
+projection, compared entry for entry — and a widened hysteresis moves both runs
+identically, so equality alone walks straight past it. What catches it is the
+anchor beside the differential: the raise must land on seq 89 and the resolve
+on seq 152, the frames `src/journey.test.ts` derives. **A differential test can
+only see what makes two runs disagree; anything that moves both is invisible to
+it, and needs an absolute assertion sitting next to it.**
+
+Two of the three sections were written wrong first, and both times the test was
+green while asserting nothing.
+
+The saturation control took two corrections. Paced one round per event-loop
+turn, the background flood landed entirely after the replay had finished, so
+the "loaded" run was a second quiet run and the comparison was between two
+identical idle servers. Pre-queued instead — all 16 000 frames written before
+the replay — the server drained every one of them before the replay's first
+frame was even acknowledged, three runs out of three, which is the same failure
+with the opposite shape. What works is continuous: one frame per device per
+turn, sustained, with the control asserting that more background frames were
+acknowledged **between this fixture's first frame and its last** than the
+fixture itself contains. The general form: a positive control for "under load"
+has to be read at the moment the property is exercised, not at the end of the
+test.
+
+The reorder generator claimed a window it had no bound on. Drawing from a
+sliding pool of 32 reads like "reordered by at most 32" and is not — an unlucky
+seq can sit in the pool arbitrarily long — and the first run produced
+regressions deep enough for the store to call them reboots, twenty-nine session
+epochs on the first device. The store was right and the test was wrong.
+Shuffling inside fixed blocks makes the worst case a number: no frame is ever
+more than `REORDER_DEPTH - 1` below the highest seq sent.
+
+One smaller thing, on the way: `watch()` attached its message listener after
+awaiting the socket's open event, and `ready` is sent the instant the upgrade
+completes. Three red runs before it was a lost greeting rather than what it
+would have been a commit later — a lost frame, on a suite whose entire job is
+counting frames.

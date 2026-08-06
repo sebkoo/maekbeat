@@ -1,14 +1,18 @@
-import { type ChildProcess, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { createServer, type Server } from "node:http";
-import { connect, type AddressInfo, type Socket } from "node:net";
-import { fileURLToPath } from "node:url";
+import { connect, type Socket } from "node:net";
 import { inspect } from "node:util";
 
 import { TraceFlags } from "@opentelemetry/api";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 
+import {
+  startCollector,
+  startSpawnedServer,
+  stopAndAwaitExit,
+  type Collector,
+  type SpawnedServer,
+} from "../test-support";
 import { loadConfig } from "./config";
 import { SPAN_NAMES, startTracing } from "./tracing";
 
@@ -25,130 +29,7 @@ import { SPAN_NAMES, startTracing } from "./tracing";
  * were collected for.
  */
 
-const SERVER_DIR = fileURLToPath(new URL("..", import.meta.url));
-
-/** A minimal OTLP/HTTP collector: records every trace payload posted to it. */
-/** A span as it appears in the OTLP JSON payload. */
-interface WireSpan {
-  name?: string;
-  spanId?: string;
-  parentSpanId?: string;
-  traceId?: string;
-}
-
-interface Collector {
-  url: string;
-  payloads: unknown[];
-  /** Every span that actually reached the wire, with its parentage intact. */
-  spans: () => WireSpan[];
-  close: () => Promise<void>;
-}
-
-async function startCollector(): Promise<Collector> {
-  const payloads: unknown[] = [];
-  const server: Server = createServer((req, res) => {
-    const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
-    req.on("end", () => {
-      try {
-        payloads.push(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-      } catch {
-        payloads.push({ unparseable: true });
-      }
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end("{}");
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address() as AddressInfo;
-
-  return {
-    url: `http://127.0.0.1:${port}/v1/traces`,
-    payloads,
-    // @opentelemetry/exporter-trace-otlp-http posts OTLP JSON, so the wire
-    // payload is readable here — the assertion is about what actually left the
-    // process, not about what an in-memory exporter was handed.
-    spans: () => {
-      const out: WireSpan[] = [];
-      for (const payload of payloads) {
-        const resourceSpans =
-          (payload as { resourceSpans?: { scopeSpans?: { spans?: WireSpan[] }[] }[] })
-            .resourceSpans ?? [];
-        for (const rs of resourceSpans) {
-          for (const ss of rs.scopeSpans ?? []) {
-            for (const span of ss.spans ?? []) out.push(span);
-          }
-        }
-      }
-      return out;
-    },
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
-  };
-}
-
-interface SpawnedServer {
-  child: ChildProcess;
-  port: number;
-  stderr: () => string;
-}
-
-async function freePort(): Promise<number> {
-  const probe = createServer();
-  await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
-  const { port } = probe.address() as AddressInfo;
-  await new Promise<void>((resolve) => probe.close(() => resolve()));
-  return port;
-}
-
-/**
- * Starts the real process entry (src/main.ts) and waits until it reports the
- * port it bound.
- *
- * Retried, because choosing a port for another process is inherently racy:
- * `freePort` binds one, closes it, and hands over the number, and anything on
- * the machine may take it in between. That is not theoretical — this suite ran
- * green in isolation and failed about one run in four once the whole workspace
- * ran four packages' vitest processes at once. A lost race makes the child exit
- * non-zero immediately, which is a retryable condition and nothing else;
- * `PORT=0` would remove the race outright but the environment contract
- * deliberately rejects it (src/config.test.ts), and a test is not a reason to
- * widen a production contract.
- *
- * Readiness is the child's own `started` log line rather than a health poll,
- * so what is awaited is the server saying it is listening.
- */
-async function startServer(env: Record<string, string>, attempt = 0): Promise<SpawnedServer> {
-  const port = await freePort();
-  const child = spawn(process.execPath, ["--import", "tsx", "src/main.ts"], {
-    cwd: SERVER_DIR,
-    env: {
-      ...process.env,
-      NODE_ENV: "test",
-      LOG_LEVEL: "info",
-      HOST: "127.0.0.1",
-      PORT: String(port),
-      ...env,
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let stderr = "";
-  let stdout = "";
-  child.stderr?.on("data", (chunk: Buffer) => (stderr += chunk.toString("utf8")));
-  child.stdout?.on("data", (chunk: Buffer) => (stdout += chunk.toString("utf8")));
-
-  const started = (): boolean => stdout.includes('"started"');
-
-  const deadline = Date.now() + 30_000;
-  for (;;) {
-    if (started()) return { child, port, stderr: () => stderr };
-    if (child.exitCode !== null) {
-      if (attempt < 4) return startServer(env, attempt + 1);
-      throw new Error(`server exited early (${String(child.exitCode)}): ${stderr}`);
-    }
-    if (Date.now() > deadline) throw new Error(`server never reported started: ${stderr}`);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-}
+const startServer = startSpawnedServer;
 
 /** One valid frame, enough to open a trace. */
 function frame(seq: number): string {
@@ -239,24 +120,6 @@ async function attachRudePeer(
       return state.destroyed;
     },
   };
-}
-
-/**
- * SIGTERM, then wait for the process to end by itself.
- *
- * Nothing here sends SIGKILL. src/main.ts does not call `process.exit` on the
- * successful path, so the process ends only when the event loop is empty — a
- * leaked timer or an unclosed socket hangs here and the test fails on its own
- * timeout, which is the point.
- */
-function stopAndAwaitExit(
-  child: ChildProcess,
-): Promise<{ code: number | null; signal: string | null }> {
-  const exited = new Promise<{ code: number | null; signal: string | null }>((resolve) => {
-    child.once("exit", (code, signal) => resolve({ code, signal }));
-  });
-  child.kill("SIGTERM");
-  return exited;
 }
 
 describe("tracing off by default", () => {
