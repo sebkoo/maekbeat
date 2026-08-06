@@ -1,6 +1,6 @@
 # @maekbeat/server
 
-The Maekbeat API server, C5–C18 of [docs/ROADMAP.md](../../docs/ROADMAP.md): WebSocket vitals ingest validated against [@maekbeat/protocol](../../packages/protocol), a bounded per-device ring buffer, a sliding-window alert engine, REST reads, the WebSocket fan-out that feeds [apps/web](../web) — all in the OpenAPI document — and OpenTelemetry spans over that path.
+The Maekbeat API server, C5–C19 of [docs/ROADMAP.md](../../docs/ROADMAP.md): WebSocket vitals ingest validated against [@maekbeat/protocol](../../packages/protocol), a bounded per-device ring buffer, a sliding-window alert engine, REST reads, the WebSocket fan-out that feeds [apps/web](../web) — all in the OpenAPI document — OpenTelemetry spans over that path, and since C19 the build identity it serves on `/healthz`.
 
 ## Run it
 
@@ -111,7 +111,7 @@ One row per test file, mapping it to the behaviors it pins — the file-to-behav
 
 | File                                                           | Pins                                                                                                                                                                        |
 | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [src/config.test.ts](src/config.test.ts)                       | env defaults and overrides; invalid values rejected with the variable named                                                                                                 |
+| [src/config.test.ts](src/config.test.ts)                       | env defaults and overrides; invalid values rejected with the variable named; BUILD_REVISION required in production and absent elsewhere                                     |
 | [src/app.test.ts](src/app.test.ts)                             | /healthz body and version; central error handler masks 5xx outside development, passes 4xx through                                                                          |
 | [src/store.test.ts](src/store.test.ts)                         | dedupe identity, reorder-window edges, reboot epochs, eviction, read ordering                                                                                               |
 | [src/store.property.test.ts](src/store.property.test.ts)       | seeded seq-pattern attacks vs a docs/DECISIONS.md #11 oracle — 5 seeds × 400 rounds × 2 devices × 2 capacities                                                              |
@@ -135,19 +135,22 @@ The gate and the reporting are separate things, and C10 separated them in CI ([.
 
 ## Configuration
 
-| Variable                             | Default           | Values                                                 |
-| ------------------------------------ | ----------------- | ------------------------------------------------------ |
-| `HOST`                               | `127.0.0.1`       | bind address; use `0.0.0.0` in containers              |
-| `PORT`                               | `3000`            | integer, 1–65535                                       |
-| `LOG_LEVEL`                          | `info`            | `fatal` `error` `warn` `info` `debug` `trace` `silent` |
-| `NODE_ENV`                           | `development`     | `development` `test` `production`                      |
-| `RING_CAPACITY`                      | `1024`            | frames kept per device, 1–65536                        |
-| `CORS_ORIGIN`                        | `*`               | browser origins allowed to read: `*` or a comma list   |
-| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | unset             | http(s) URL; unset means tracing is off entirely       |
-| `OTEL_SERVICE_NAME`                  | `maekbeat-server` | `service.name` on every exported span                  |
+| Variable                             | Default           | Values                                                                |
+| ------------------------------------ | ----------------- | --------------------------------------------------------------------- |
+| `HOST`                               | `127.0.0.1`       | bind address; use `0.0.0.0` in containers                             |
+| `PORT`                               | `3000`            | integer, 1–65535                                                      |
+| `LOG_LEVEL`                          | `info`            | `fatal` `error` `warn` `info` `debug` `trace` `silent`                |
+| `NODE_ENV`                           | `development`     | `development` `test` `production`                                     |
+| `RING_CAPACITY`                      | `1024`            | frames kept per device, 1–65536                                       |
+| `CORS_ORIGIN`                        | `*`               | browser origins allowed to read: `*` or a comma list                  |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | unset             | http(s) URL; unset means tracing is off entirely                      |
+| `OTEL_SERVICE_NAME`                  | `maekbeat-server` | `service.name` on every exported span                                 |
+| `BUILD_REVISION`                     | unset             | the commit this build came from; required under `NODE_ENV=production` |
 
 Configuration is read from `process.env` only ([src/config.ts](src/config.ts)); [.env.example](.env.example) documents each variable and holds no secrets. To use a file, copy it to `.env` and pass `--env-file=.env` to Node, or export the variables in the shell.
 
+`BUILD_REVISION` is the one variable whose absence is fatal, and only in production. A developer checkout is a working tree rather than a commit, so outside production the server says `unidentified` on `/healthz` instead of inventing a SHA. A production image that cannot name its commit cannot be caught serving a stale layer, so there it refuses to start with the variable named — the container image passes it as a build argument and stamps the same value on `org.opencontainers.image.revision` ([infra/server.Dockerfile](../../infra/server.Dockerfile)).
+
 ## Skeleton (C5)
 
-[src/app.ts](src/app.ts) carries the C5 base: pino logging, a central error handler that masks 5xx details outside development, @fastify/swagger. [src/main.ts](src/main.ts) is composition only; the shutdown sequence moved to [src/lifecycle.ts](src/lifecycle.ts) at C18, where it is tested — SIGTERM/SIGINT drain in-flight requests via `app.close()` and then flush the tracer provider, the same signal path an ECS task stop will use (infra planned — C19).
+[src/app.ts](src/app.ts) carries the C5 base: pino logging, a central error handler that masks 5xx details outside development, @fastify/swagger. [src/main.ts](src/main.ts) is composition only; the shutdown sequence moved to [src/lifecycle.ts](src/lifecycle.ts) at C18, where it is tested — SIGTERM/SIGINT drain in-flight requests via `app.close()` and then flush the tracer provider, the same signal path an ECS task stop will use. The container form of that stop shipped at C19: `docker compose stop -t 10` against [infra/compose.yaml](../../infra/compose.yaml), asserted with a peer attached that answers nothing ([infra/compose-smoke.sh](../../infra/compose-smoke.sh)).

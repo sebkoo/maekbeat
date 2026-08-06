@@ -1,0 +1,63 @@
+# What the container build is allowed to see (infra/server.Dockerfile,
+# infra/web.Dockerfile). Both builds use the repository root as their context,
+# because the pnpm lockfile and every workspace manifest have to be there for
+# `pnpm install --frozen-lockfile` to be able to fail on drift.
+#
+# Two different jobs are done here, and confusing them is how debris ships:
+#
+#   - Keeping the context small is a speed and cache concern. Sending the
+#     Playwright browser cache or a coverage directory to the daemon costs
+#     seconds and invalidates layers for reasons the source did not cause.
+#   - Keeping files out of paths the Dockerfile copies wholesale is a contents
+#     concern, and that one is asserted rather than trusted:
+#     infra/verify-image.sh fails if a *.test.ts, a .git directory or a dev-only
+#     dependency is found inside the built image. The `**/*.test.ts` line below
+#     is the load-bearing one for that check — apps/server and packages/* are
+#     copied whole.
+
+# Version control and CI machinery. Nothing in the image is built from history.
+.git
+.gitignore
+.gitattributes
+.github
+.githooks
+
+# Installed trees are rebuilt inside the image from the lockfile, never copied.
+node_modules
+**/node_modules
+**/dist
+**/build
+**/coverage
+.pnpm-store
+
+# Tests and their harnesses. The image runs the server; it does not run a suite.
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/vitest.config.ts
+**/vitest.setup.ts
+**/playwright.config.ts
+apps/server/test-support.ts
+apps/server/scripts
+apps/web/e2e
+apps/web/test-results
+apps/web/playwright-report
+apps/web/blob-report
+
+# Not part of any image: the iOS app, the docs set, the repo-level scripts,
+# and the demo assets.
+apps/ios
+docs
+scripts
+LICENSE
+**/*.md
+
+# Local environment files. .env.example is documentation and is excluded with
+# the rest — nothing in an image reads a file for its configuration.
+.env
+.env.*
+**/.env
+**/.env.*
+
+# macOS.
+.DS_Store

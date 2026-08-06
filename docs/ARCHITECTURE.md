@@ -71,6 +71,23 @@ Parentage is passed explicitly at each call rather than read from an ambient con
 
 Attributes: deviceId, seq, session epoch, the duplicate and out-of-order flags, the ingest outcome, the validate and store results, the transition count, and per alert its id, lifecycle state, metric and direction. No reading value enters a span. The rule is "never a measured value" rather than "identifiers only", because an alert span names the rule that fired and therefore does say a device had a low-SpO2 episode — that is the alert itself, and the trade is recorded in docs/DECISIONS.md #20.
 
+## How it runs: container topology (C19)
+
+`docker compose -f infra/compose.yaml up --build` starts two containers and nothing else is needed on the machine. `maekbeat-server` is the API of stages 3 through 7, listening on 127.0.0.1:3000. `maekbeat-web` is unprivileged nginx over the `vite build` output, on 127.0.0.1:8080.
+
+```mermaid
+flowchart LR
+  B["browser<br/>on the host"] -->|"GET /  (8080)"| W["maekbeat-web<br/>nginx, static bundle"]
+  B -->|"REST + WS, cross-origin  (3000)"| S["maekbeat-server<br/>node + tsx, non-root"]
+  G["iOS gateway / vitals-sim<br/>(outside the stack)"] -->|"WS /ingest  (3000)"| S
+```
+
+The two containers never talk to each other. There is no reverse proxy in front of them, so the browser reaches the API across an origin boundary exactly as it does in development, and the server's `CORS_ORIGIN` names the web origin explicitly — the crossing the C13 smoke exists to prove would be erased by a proxy, with the suite still green (docs/DECISIONS.md #21). The consequence is two published ports rather than one, both bound to loopback because this server authenticates nobody.
+
+The image is the server. apps/web is a static bundle whose deployment target is an S3 origin behind a CDN, so the web container exists to run the smoke and is not a production artifact — nothing in infra/nginx.conf may grow a runtime. Configuration reaches the server through the environment only, and `BUILD_REVISION` is required under `NODE_ENV=production`: an image that cannot name its commit cannot be caught serving a stale layer, which is C13's stale-bundle lesson one layer down. That value is the image's `org.opencontainers.image.revision` label and the `revision` field on `/healthz`, and infra/compose-smoke.sh asserts both against `git rev-parse HEAD`.
+
+The host that builds is arm64 and the deploy target is x86-64. `docker build` on an Apple Silicon machine produces an arm64 image and says nothing about it, and that image cannot execute on the target at all — so the deploy-target build passes `--platform linux/amd64` and infra/verify-image.sh asserts the built artifact's architecture and then makes it run and report `process.arch` (docs/DECISIONS.md #22). Anyone cloning this on an x86-64 Linux machine gets the same two images from the same commands; what changes is only which of the two builds is the emulated one. Measured build times and image sizes, with the runtime named, are in [infra/README.md](../infra/README.md).
+
 ## Latency budgets — all TARGETS
 
 | Path                                  | Target    | How C19 measures it                                                                                                                                          |

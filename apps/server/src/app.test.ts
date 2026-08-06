@@ -25,6 +25,23 @@ describe("GET /healthz", () => {
 
     await app.close();
   });
+
+  it("serves the configured BUILD_REVISION, and says so when there is none", async () => {
+    // The response schema is additionalProperties:false, so a field the route
+    // computes but the schema omits is silently dropped — this asserts the
+    // value that leaves the process, not the object literal inside it.
+    const identified = await buildApp(loadConfig({ ...quietEnv, BUILD_REVISION: "cafe123" }));
+    expect((await identified.inject({ method: "GET", url: "/healthz" })).json()).toMatchObject({
+      revision: "cafe123",
+    });
+    await identified.close();
+
+    const anonymous = await buildApp(loadConfig(quietEnv));
+    expect((await anonymous.inject({ method: "GET", url: "/healthz" })).json()).toMatchObject({
+      revision: "unidentified",
+    });
+    await anonymous.close();
+  });
 });
 
 describe("central error handler", () => {

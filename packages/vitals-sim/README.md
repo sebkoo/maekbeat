@@ -2,7 +2,7 @@
 
 Deterministic synthetic vitals generator: the fake wearable at the head of the Maekbeat pipeline. It emits `VitalsFrame` objects typed by [@maekbeat/protocol](../protocol/README.md) — this package is the contract's first workspace consumer, and every emitted frame parses under `vitalsFrameSchema` (proven in `src/generator.test.ts`).
 
-The scenario shapes below are plausibility heuristics for a demo, not clinical models. They exist so the alert engine (shipped — C7) and the dashboard (shipped — C10–C13) receive signal shaped like a wearable's output; no diagnostic claim is made anywhere in this repo (see [DISCLAIMER.md](../../DISCLAIMER.md)).
+The scenario shapes below are plausibility heuristics for a demo, not clinical models. They exist so the alert engine (shipped — C7) and the dashboard (shipped — C10–C19) receive signal shaped like a wearable's output; no diagnostic claim is made anywhere in this repo (see [DISCLAIMER.md](../../DISCLAIMER.md)).
 
 ## Determinism
 

@@ -1,6 +1,6 @@
 # @maekbeat/web
 
-The caregiver dashboard, C10–C13 of [docs/ROADMAP.md](../../docs/ROADMAP.md): a React 19 + Vite + TypeScript app with the design tokens the rest of Phase 4 draws from, a typed client for the [apps/server](../server) surface, and — since C11 — live vitals over the fan-out WebSocket. C12 adds the alert timeline, server-recorded acknowledgement, and the WCAG 2.2 AA pass.
+The caregiver dashboard, C10–C19 of [docs/ROADMAP.md](../../docs/ROADMAP.md): a React 19 + Vite + TypeScript app with the design tokens the rest of Phase 4 draws from, a typed client for the [apps/server](../server) surface, and — since C11 — live vitals over the fan-out WebSocket. C12 adds the alert timeline, server-recorded acknowledgement, and the WCAG 2.2 AA pass.
 
 ## Run it
 
@@ -120,7 +120,7 @@ The smoke suite in [e2e/](e2e) runs a real Chromium against the production bundl
 
 The boundary is deliberate, and holding it is the point. End-to-end owns wiring, origins, the production build, and behaviour that only a real engine has: computed styles, focus, layout-dependent contrast, target boxes. Unit tests own logic, edge cases, properties, and every failure path that is expensive or impossible to stage in a browser — a refused decision, a malformed frame, a clock stepping backwards.
 
-So the suite is five tests, not fifty. One journey covers load, list, stream, alert, acknowledge, and reload; one covers the honest-failure path; three re-run the accessibility assertions in the real engine. Anything that could be a unit test belongs in `src/`, because a slow suite gets skipped and a skipped gate is worse than none.
+So the suite is six tests, not fifty. One journey covers load, list, stream, alert, acknowledge, and reload; one covers the honest-failure path; three re-run the accessibility assertions in the real engine; the sixth asks which build is answering, and skips when nothing has told it what to expect. Anything that could be a unit test belongs in `src/`, because a slow suite gets skipped and a skipped gate is worse than none.
 
 | Check                                  | Browser-verified (e2e) | jsdom-only (src)                           |
 | -------------------------------------- | ---------------------- | ------------------------------------------ |
@@ -130,6 +130,8 @@ So the suite is five tests, not fifty. One journey covers load, list, stream, al
 | focus ring visible                     | yes, computed style    | no                                         |
 | target size at 24x24                   | yes, measured box      | no — asserted as a CSS declaration         |
 | live-region scope                      | yes                    | yes                                        |
+
+Since C19 the same suite also runs against the compose stack, pointed there by `E2E_BASE_URL` and `E2E_API_URL` rather than forked ([playwright.config.ts](playwright.config.ts) empties its `webServer` list when both are set, and refuses one without the other). A container-shaped copy of these tests would prove that the copy passes; the containers have to face the tests that already found the real defects. `E2E_EXPECTED_REVISION` turns [e2e/identity.spec.ts](e2e/identity.spec.ts) from a skip into an assertion that the stack answering is the commit that was built — behaviour is exactly what a stale layer preserves, so identity is checked separately from it.
 
 Retries are set to zero, in CI too ([playwright.config.ts](playwright.config.ts)). A smoke test that quietly passes on the second attempt reports a system that works when what it saw was a system that failed and then worked — the same lie as a coverage badge left quietly stale.
 

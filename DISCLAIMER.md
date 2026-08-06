@@ -12,8 +12,8 @@ any medical condition.
 
 Maekbeat does not detect seizures. It is being built to demonstrate a
 pipeline of the kind used in seizure-monitoring research: synthetic vitals
-over a BLE-style transport, a Node.js relay (shipped — C5–C18), a caregiver
-dashboard (shipped — C10–C13), and an iOS app that reads that relay, forwards
+over a BLE-style transport, a Node.js relay (shipped — C5–C19), a caregiver
+dashboard (shipped — C10–C19), and an iOS app that reads that relay, forwards
 to it, and notifies on its alerts (shipped — C14–C17); the sequence is in
 docs/ROADMAP.md.
 

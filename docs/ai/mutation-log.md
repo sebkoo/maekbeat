@@ -794,3 +794,53 @@ of 0 was cancelled before its timer could fire, and the test asserted only that
 `terminate` is not called synchronously. A close handshake is a round trip, so
 the control now takes 150 ms to leave, and the grace became a number the test
 can be wrong about.
+
+## C19 — container image and compose stack
+
+Nine acceptance criteria, each an executable proof, and each proof broken on
+purpose to see it fail. `infra/verify-image.sh` covers the image;
+`infra/compose-smoke.sh` covers the stack. The criterion number in each row is
+the one those two scripts print.
+
+| Guard                                    | Mutation                                                       | Result |
+| ---------------------------------------- | -------------------------------------------------------------- | ------ |
+| 1 — non-root                             | delete `USER node` from infra/server.Dockerfile                | caught |
+| 3 — the browser really crosses an origin | drop `http://127.0.0.1:8080` from the compose CORS allowlist   | caught |
+| 3 — the served bundle is loadable        | set `base: "/wrong-base/"` in apps/web/vite.config.ts          | caught |
+| 5 — the image says which commit it is    | pin `org.opencontainers.image.revision` to a fixed SHA         | caught |
+| 5 — the process says which commit it is  | run the smoke against the live stack with a wrong expected SHA | caught |
+| 7 — no debris from this repository       | delete the `**/*.test.ts` line from .dockerignore              | caught |
+| 8 — the deploy image is amd64            | drop `--platform` from the build, so the host arch wins        | caught |
+
+Each mutation failed its own criterion and left its neighbours green, which is
+the part worth checking. Dropping the CORS origin failed four of the five
+journey tests and left the identity assertion, the golden replay and the
+shutdown proof passing — Playwright's `request` fixture is not a browser
+context, so it is not subject to CORS, and that is why the identity check is
+not a substitute for the browser one. Breaking the asset base path failed all
+five journey tests and left identity and replay green. Pinning the revision
+label failed the label comparison alone: `/healthz` still served the right SHA,
+because the label and the environment variable come from the same build
+argument and only one of them was mutated.
+
+Criteria 2, 4, 6 and 9 are proved by controls rather than by mutations, because
+each already has a natural negative case:
+
+- 2 — the golden replay asserts eleven properties of one fixture; a container
+  that serves nothing fails at the first socket.
+- 4 — the healthcheck runs twice on the same image, once with the server behind
+  it and once with the entrypoint replaced by `sleep`. Green then red, from one
+  image and one HEALTHCHECK line.
+- 6 — the image is run with `BUILD_REVISION=` and must exit non-zero naming the
+  variable, and then run again with it set as the positive control, so the
+  assertion is about the variable and not about a broken image.
+- 9 — the negative case was the starting state: before the fix in the preceding
+  commit, `docker compose stop -t 10` with a rude peer attached ended in exit
+  137 at 11 s. Afterwards, exit 0 at 2 s.
+
+One mutation was rejected as uninformative before being run. Deleting `.git`
+from .dockerignore proves nothing here: the Dockerfiles copy named paths rather
+than the whole context, so no `.git` can reach an image whether the line is
+there or not. The line stays for build speed, and the image assertion that
+there is no `.git` stays as a check on the copies, but neither is evidence
+about the other.

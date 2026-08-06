@@ -26,6 +26,7 @@
     "@opentelemetry/sdk-trace-node": "^2.10.0",
     "@opentelemetry/semantic-conventions": "^1.43.0",
     "fastify": "^5.2.0",
+    "tsx": "^4.19.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -33,7 +34,6 @@
     "@types/node": "^26.1.2",
     "@types/ws": "^8.5.0",
     "@vitest/coverage-v8": "^4.1.10",
-    "tsx": "^4.19.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10",
     "ws": "^8.18.0"

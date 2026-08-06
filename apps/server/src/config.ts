@@ -44,9 +44,33 @@ const envSchema = z.object({
     .optional(),
   /** Resource `service.name` on every exported span. */
   OTEL_SERVICE_NAME: z.string().trim().min(1).default("maekbeat-server"),
+  /**
+   * The commit this build was made from, served on /healthz and stamped on the
+   * image as `org.opencontainers.image.revision` (infra/server.Dockerfile).
+   * The two come from one build argument, so a container that answers with a
+   * revision its own label does not carry is a container running something
+   * other than what was built — which is the check infra/compose-smoke.sh
+   * makes, and the reason this variable exists at all.
+   *
+   * Required under NODE_ENV=production and absent by default everywhere else.
+   * A developer checkout is a working tree rather than a commit, and making it
+   * claim a SHA would be inventing the one fact this variable is for; a
+   * production image that cannot name its commit is the C13 stale-bundle
+   * failure with no way left to detect it, so there it is a startup error
+   * (checked in loadConfig below, not by the schema, because the requirement
+   * is a relation between two variables rather than a property of one).
+   */
+  BUILD_REVISION: z
+    .string()
+    .trim()
+    .min(1, "must name the commit this build came from, e.g. the output of `git rev-parse HEAD`")
+    .optional(),
 });
 
 export type ServerConfig = z.infer<typeof envSchema>;
+
+/** Reported by /healthz when nothing told the process which commit it is. */
+export const UNIDENTIFIED_REVISION = "unidentified";
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   const parsed = envSchema.safeParse(env);
@@ -56,5 +80,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
       .join("; ");
     throw new Error(`Invalid server environment — ${issues}`);
   }
-  return parsed.data;
+  const config = parsed.data;
+  if (config.NODE_ENV === "production" && config.BUILD_REVISION === undefined) {
+    throw new Error(
+      "Invalid server environment — BUILD_REVISION: required when NODE_ENV=production; " +
+        "set it to the commit the build came from (infra/server.Dockerfile passes it as a build argument)",
+    );
+  }
+  return config;
 }

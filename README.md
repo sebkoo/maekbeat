@@ -34,25 +34,26 @@ That diagram is the target architecture, not today's system — the Status board
 
 ## Design notes
 
-| Topic                                    | Where                                                                                      | Status                          |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------- |
-| BLE→cloud pipeline design                | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) scaling chain + failure modes                 | C4 ✅                           |
-| Alert validation without patient data    | synthetic scenarios + golden tests; apps/server tests                                      | C3 ✅ · C8 ✅                   |
-| Scaling model and load evidence          | target architecture + k6 results                                                           | C4 ✅ · C19 (planned)           |
-| Alert states legible without colour      | tokens + contract test, rendered by apps/web/src/components/AlertTimeline.tsx              | C10 ✅ · C12 ✅                 |
-| Missing data drawn as missing            | chart gaps + min/max decimation, pinned in apps/web/src/chart                              | C11 ✅                          |
-| Alarm fatigue and acknowledgement        | episode timeline + append-only decision log (apps/server/src/acks.ts)                      | C12 ✅ · C16 ✅ · C21 (planned) |
-| Accessibility of a live monitoring UI    | axe + keyboard + live-region scope, [apps/web](apps/web) a11y.test.tsx                     | C12 ✅                          |
-| One wire contract, two languages         | Swift decodes the TypeScript goldens, [apps/ios](apps/ios) README                          | C14 ✅                          |
-| BLE profile with an MTU budget           | [docs/ble-gatt-profile.md](docs/ble-gatt-profile.md) — 19 bytes of 20                      | C15 ✅                          |
-| Testing what has no hardware             | thin adapter over a proved state machine, [apps/ios](apps/ios) README                      | C15 ✅ · C16 ✅ · C17 ✅        |
-| Proving the wiring, not just the parts   | composition tests + seeded properties, [apps/ios](apps/ios) test map                       | C12a ✅ · C13 ✅ · C17 ✅       |
-| What an alert may say on a lock screen   | banned-word list over the notification body, [apps/ios](apps/ios) README                   | C16 ✅                          |
-| Instrumentation before observability     | one trace per frame, parentage asserted by span id (apps/server/src/tracing.shape.test.ts) | C18 ✅ · C19 (planned)          |
-| Health-data security posture             | [SECURITY.md](SECURITY.md) (today) · docs/security/threat-model.md                         | C22 (planned)                   |
-| iOS background execution + BLE lifecycle | five-phase machine + background notes, [apps/ios](apps/ios) README                         | C15 ✅                          |
-| Tooling choices and trade-offs           | [docs/DECISIONS.md](docs/DECISIONS.md) (20 entries today)                                  | C0 ✅                           |
-| Process auditability                     | ADRs in docs/adr · PR template + CI hygiene job in .github                                 | C0 ✅                           |
+| Topic                                       | Where                                                                                      | Status                          |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------- |
+| BLE→cloud pipeline design                   | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) scaling chain + failure modes                 | C4 ✅                           |
+| Alert validation without patient data       | synthetic scenarios + golden tests; apps/server tests                                      | C3 ✅ · C8 ✅                   |
+| Scaling model and load evidence             | target architecture + k6 results                                                           | C4 ✅ · C19 (planned)           |
+| Alert states legible without colour         | tokens + contract test, rendered by apps/web/src/components/AlertTimeline.tsx              | C10 ✅ · C12 ✅                 |
+| Missing data drawn as missing               | chart gaps + min/max decimation, pinned in apps/web/src/chart                              | C11 ✅                          |
+| Alarm fatigue and acknowledgement           | episode timeline + append-only decision log (apps/server/src/acks.ts)                      | C12 ✅ · C16 ✅ · C21 (planned) |
+| Accessibility of a live monitoring UI       | axe + keyboard + live-region scope, [apps/web](apps/web) a11y.test.tsx                     | C12 ✅                          |
+| One wire contract, two languages            | Swift decodes the TypeScript goldens, [apps/ios](apps/ios) README                          | C14 ✅                          |
+| BLE profile with an MTU budget              | [docs/ble-gatt-profile.md](docs/ble-gatt-profile.md) — 19 bytes of 20                      | C15 ✅                          |
+| Testing what has no hardware                | thin adapter over a proved state machine, [apps/ios](apps/ios) README                      | C15 ✅ · C16 ✅ · C17 ✅        |
+| Proving the wiring, not just the parts      | composition tests + seeded properties, [apps/ios](apps/ios) test map                       | C12a ✅ · C13 ✅ · C17 ✅       |
+| What an alert may say on a lock screen      | banned-word list over the notification body, [apps/ios](apps/ios) README                   | C16 ✅                          |
+| Instrumentation before observability        | one trace per frame, parentage asserted by span id (apps/server/src/tracing.shape.test.ts) | C18 ✅ · C19 (planned)          |
+| Proving a container is the commit it claims | image label and /healthz revision, both asserted against git ([infra](infra))              | C19 ✅                          |
+| Health-data security posture                | [SECURITY.md](SECURITY.md) (today) · docs/security/threat-model.md                         | C22 (planned)                   |
+| iOS background execution + BLE lifecycle    | five-phase machine + background notes, [apps/ios](apps/ios) README                         | C15 ✅                          |
+| Tooling choices and trade-offs              | [docs/DECISIONS.md](docs/DECISIONS.md) (22 entries today)                                  | C0 ✅                           |
+| Process auditability                        | ADRs in docs/adr · PR template + CI hygiene job in .github                                 | C0 ✅                           |
 
 Engineers: start at [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · the why: [docs/DECISIONS.md](docs/DECISIONS.md) · the plan: [docs/ROADMAP.md](docs/ROADMAP.md).
 
@@ -61,6 +62,8 @@ Engineers: start at [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · the why: [do
 ```sh
 git clone https://github.com/sebkoo/maekbeat.git && cd maekbeat && ./scripts/bootstrap.sh
 ```
+
+Or run the whole thing with no toolchain at all: `BUILD_REVISION=$(git rev-parse HEAD) docker compose -f infra/compose.yaml up --build` starts the API and the dashboard in two containers, on <http://127.0.0.1:8080>, with no pnpm and no Node installed ([infra/README.md](infra/README.md)).
 
 [scripts/bootstrap.sh](scripts/bootstrap.sh) verifies the toolchain and activates the .githooks. The pipeline is runnable since C6: `pnpm --filter @maekbeat/server demo` streams simulator frames over WebSocket into [apps/server](apps/server), raises and resolves a demo alert on the anomaly scenario (C7), pushes the same frames to a subscribed dashboard socket (C11), and reads it all back over REST.
 
@@ -77,12 +80,12 @@ The clock delta on screen is part of the same artefact. The simulator replays on
 ## Repository tour
 
 ```text
-apps/        server (WS ingest · ring buffer · alert engine · REST reads · fan-out · decisions · tracing — C5–C18)
-             web (tokens · live chart · timeline · acknowledgement · WCAG 2.2 AA · e2e smoke — C10–C13)
+apps/        server (WS ingest · ring buffer · alert engine · REST reads · fan-out · decisions · tracing · build identity — C5–C19)
+             web (tokens · live chart · timeline · acknowledgement · WCAG 2.2 AA · e2e smoke — C10–C19)
              ios (SwiftUI · golden-decode contract · BLE state machine · gateway uplink · notifications — C14–C17)
 packages/    protocol (shared vitals contract: types + zod schemas)
              vitals-sim (deterministic synthetic vitals: rest, motion, anomaly)
-infra/       Docker, compose, AWS CDK stacks — planned, C19
+infra/       server + web images, compose stack, image and stack proofs — C19; AWS CDK stacks — planned, C19
 docs/        adr · ai · regulatory · demo · ROADMAP.md · DECISIONS.md · ble-gatt-profile.md
 .githooks/   pre-commit formatting · commit-msg trailer + Conventional Commit checks
 .github/     CI workflows · PR template
@@ -98,7 +101,7 @@ scripts/     bootstrap + hygiene checks
 | 3 — Server               | Fastify, WS ingest, alert engine, tests, coverage gate                                                                                        | ✅     | [C5 skeleton](https://github.com/sebkoo/maekbeat/commit/d352705) · [C6 ingest](https://github.com/sebkoo/maekbeat/commit/0170638) · [C7 alerts](https://github.com/sebkoo/maekbeat/commit/2a1d563) · [C8 tests](https://github.com/sebkoo/maekbeat/commit/2356a62) · [C9 gate](https://github.com/sebkoo/maekbeat/commit/eba4e44) · [C12a retention](https://github.com/sebkoo/maekbeat/commit/5ac4510) · [ratchet raise](https://github.com/sebkoo/maekbeat/commit/f20ccbb) |
 | 4 — Web                  | React scaffold, live chart, timeline + ack, tests                                                                                             | ✅     | [C10 tokens](https://github.com/sebkoo/maekbeat/commit/6e9c81c) · [C11 live chart](https://github.com/sebkoo/maekbeat/commit/8dfe023) · [C12 timeline + ack + WCAG](https://github.com/sebkoo/maekbeat/commit/66e30df) · [C13 smoke](https://github.com/sebkoo/maekbeat/commit/18aa597) · [flake repair](https://github.com/sebkoo/maekbeat/commit/4f59d60)                                                                                                                  |
 | 5 — iOS                  | SwiftUI scaffold + simulator transport, CoreBluetooth central + gateway, notifications, XCTest                                                | ✅     | [C14 scaffold](https://github.com/sebkoo/maekbeat/commit/ec08ac5) · [C15 BLE + gateway](https://github.com/sebkoo/maekbeat/commit/ad96c2f) · [C16 notifications](https://github.com/sebkoo/maekbeat/commit/dfb105a) · C17 seams + ratchet                                                                                                                                                                                                                                    |
-| 6 — Infra & operations   | OTel tracing (C18), Docker + compose, CDK synth-in-CI, k6                                                                                     | ⬜     | C18 tracing · C19 container + CDK                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| 6 — Infra & operations   | OTel tracing (C18), Docker + compose, CDK synth-in-CI, k6                                                                                     | ⬜     | C18 tracing · C19 image + compose · CDK synth-in-CI and k6 still to come                                                                                                                                                                                                                                                                                                                                                                                                     |
 | 7 — Depth                | intended use, risk register, threat model, SBOM                                                                                               | ⬜     | C20–C22                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | 8 — Release              | v0.1.0                                                                                                                                        | ⬜     | C23                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
@@ -109,9 +112,9 @@ Updated in the same commit as every scope change. A commit cannot link itself, s
 | Layer   | Tools                                                                                                   | Status                                                                                                                                                                       |
 | ------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | iOS     | Swift 5.10+, SwiftUI, SwiftLint, XCTest, CoreBluetooth, UserNotifications                               | reads apps/server over REST + WebSocket, implements the BLE central role of a profile no hardware speaks, and notifies locally on its alerts ([apps/ios](apps/ios), C14–C17) |
-| Web     | React 19, Vite, TypeScript                                                                              | tokens, live chart, timeline, acknowledgement, WCAG 2.2 AA, e2e smoke ([apps/web](apps/web), C10–C13)                                                                        |
-| Server  | Node 22, TypeScript, Fastify, WebSocket, OpenTelemetry                                                  | ingest, alerts, reads, fan-out, decisions, semantic retention, tracing ([apps/server](apps/server), C5–C18)                                                                  |
-| Infra   | AWS CDK: S3, Lambda, ECR, ECS/EC2; Docker                                                               | planned, C19                                                                                                                                                                 |
+| Web     | React 19, Vite, TypeScript                                                                              | tokens, live chart, timeline, acknowledgement, WCAG 2.2 AA, e2e smoke ([apps/web](apps/web), C10–C19)                                                                        |
+| Server  | Node 22, TypeScript, Fastify, WebSocket, OpenTelemetry                                                  | ingest, alerts, reads, fan-out, decisions, semantic retention, tracing ([apps/server](apps/server), C5–C19)                                                                  |
+| Infra   | Docker + compose; AWS CDK: S3, Lambda, ECR, ECS/EC2                                                     | server and web images and the compose stack ([infra](infra), C19); CDK stacks planned, C19                                                                                   |
 | Quality | prettier + markdownlint via .githooks; CI hygiene, workspace tests, coverage ratchets, iOS lint + tests | live today, [.github/workflows/ci.yml](.github/workflows/ci.yml)                                                                                                             |
 
 ## Why I'm building this

@@ -1,0 +1,71 @@
+# The whole system in one command:
+#
+#   BUILD_REVISION=$(git rev-parse HEAD) docker compose -f infra/compose.yaml up --build
+#
+# Then the dashboard is at http://127.0.0.1:8080 and the API at
+# http://127.0.0.1:3000. Nothing else is needed on the machine — no pnpm, no
+# Node, no Xcode.
+#
+# Two properties are deliberate and both cost something:
+#
+#   - No reverse proxy, so the browser reaches the API across an origin
+#     boundary exactly as it does in development. A proxy would be one fewer
+#     port to explain and would erase the crossing the C13 smoke exists to
+#     prove (docs/DECISIONS.md #21).
+#   - No host bind mounts. Every file a container needs is copied into its
+#     image, because Colima and Docker Desktop differ on mount semantics and a
+#     stack that depends on them is a stack that runs on one laptop.
+#
+# There is no service-to-service traffic here at all: the browser talks to both
+# containers and they never talk to each other. That is a consequence of the
+# first property rather than an accident, and it is why no service name appears
+# in any address below.
+
+name: maekbeat
+
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: infra/server.Dockerfile
+      args:
+        # No default. An unset BUILD_REVISION stops the build with this
+        # message rather than producing an image that cannot say what it is.
+        BUILD_REVISION: ${BUILD_REVISION:?set it to the commit being built, e.g. BUILD_REVISION=$(git rev-parse HEAD)}
+    image: maekbeat-server:compose
+    environment:
+      # The image already sets NODE_ENV, HOST, PORT and BUILD_REVISION; what is
+      # here is what a deployment decides rather than what the image is.
+      LOG_LEVEL: info
+      # The dashboard's two host origins, spelled out. `*` would work and would
+      # make the C13 origin assertion unfalsifiable — the allowlist is only a
+      # guard if removing an entry breaks something (docs/DECISIONS.md #21).
+      CORS_ORIGIN: http://127.0.0.1:8080,http://localhost:8080
+    ports:
+      # Loopback only. This server authenticates nobody (SECURITY.md), so it
+      # has no business being reachable from the network the laptop is on.
+      - "127.0.0.1:3000:3000"
+    # Matches `docker compose stop -t 10`. The server closes its listener,
+    # destroys any WebSocket peer that ignores the close frame, and flushes
+    # tracing (apps/server/src/lifecycle.ts); ten seconds is the budget in
+    # which all three must finish, and infra/compose-smoke.sh asserts that a
+    # deliberately rude client does not push it past that into a SIGKILL.
+    stop_grace_period: 10s
+
+  web:
+    build:
+      context: ..
+      dockerfile: infra/web.Dockerfile
+      args:
+        BUILD_REVISION: ${BUILD_REVISION:?set it to the commit being built, e.g. BUILD_REVISION=$(git rev-parse HEAD)}
+        # Compiled into the bundle, so it is the address the browser uses.
+        VITE_API_BASE_URL: http://127.0.0.1:3000
+    image: maekbeat-web:compose
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      server:
+        # The dashboard's first paint reads /devices. Starting it before the
+        # API answers would make the stack's first thirty seconds look like the
+        # failure state the C13 suite has a test for.
+        condition: service_healthy

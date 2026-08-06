@@ -19,8 +19,34 @@ import { defineConfig, devices } from "@playwright/test";
 
 export const API_PORT = 3210;
 export const WEB_PORT = 4210;
-export const BASE_URL = `http://127.0.0.1:${WEB_PORT}`;
-export const API_URL = `http://127.0.0.1:${API_PORT}`;
+
+/*
+ * Where the suite points, and the one thing that changes between running it
+ * against a developer checkout and running it against the C19 compose stack.
+ *
+ * The suite itself does not change. A second, container-shaped copy of these
+ * tests would prove that the copy passes and nothing about the system — the
+ * whole argument for this file is that it drives the real processes, and a
+ * fork of it would drive a different real thing and agree with itself.
+ *
+ * Both variables or neither. Setting one leaves the browser loading the
+ * composed dashboard while the fixtures stream frames into a locally spawned
+ * server, which fails as a puzzle rather than as a message.
+ */
+const externalBase = process.env.E2E_BASE_URL;
+const externalApi = process.env.E2E_API_URL;
+if ((externalBase === undefined) !== (externalApi === undefined)) {
+  throw new Error(
+    "E2E_BASE_URL and E2E_API_URL must be set together: one alone points the browser " +
+      "and the fixtures at different systems (infra/compose-smoke.sh sets both).",
+  );
+}
+
+/** True when the suite is aimed at something this file did not start. */
+export const usesExternalStack = externalBase !== undefined;
+
+export const BASE_URL = externalBase ?? `http://127.0.0.1:${WEB_PORT}`;
+export const API_URL = externalApi ?? `http://127.0.0.1:${API_PORT}`;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -54,20 +80,27 @@ export default defineConfig({
   // Two real processes. The dashboard is built with the API's address baked in,
   // so the browser makes a genuine cross-origin request to a different port —
   // exactly the shape that was broken and undetected until C12.
-  webServer: [
-    {
-      command: "pnpm --filter @maekbeat/server start",
-      env: { PORT: String(API_PORT), LOG_LEVEL: "warn" },
-      url: `${API_URL}/healthz`,
-      reuseExistingServer: !process.env.CI,
-      timeout: 60_000,
-    },
-    {
-      command: `pnpm --filter @maekbeat/web build && pnpm --filter @maekbeat/web exec vite preview --host 127.0.0.1 --port ${WEB_PORT} --strictPort`,
-      env: { VITE_API_BASE_URL: API_URL },
-      url: BASE_URL,
-      reuseExistingServer: !process.env.CI,
-      timeout: 120_000,
-    },
-  ],
+  //
+  // Empty when the stack is already running somewhere else (the compose stack,
+  // C19): the two containers are the two processes, built the same way and
+  // crossing the same origin boundary, and starting a second pair here would
+  // have the suite testing them instead.
+  webServer: usesExternalStack
+    ? []
+    : [
+        {
+          command: "pnpm --filter @maekbeat/server start",
+          env: { PORT: String(API_PORT), LOG_LEVEL: "warn" },
+          url: `${API_URL}/healthz`,
+          reuseExistingServer: !process.env.CI,
+          timeout: 60_000,
+        },
+        {
+          command: `pnpm --filter @maekbeat/web build && pnpm --filter @maekbeat/web exec vite preview --host 127.0.0.1 --port ${WEB_PORT} --strictPort`,
+          env: { VITE_API_BASE_URL: API_URL },
+          url: BASE_URL,
+          reuseExistingServer: !process.env.CI,
+          timeout: 120_000,
+        },
+      ],
 });

@@ -7,7 +7,7 @@ import { fastify } from "fastify";
 
 import { DecisionLog } from "./acks";
 import { AlertEngine, DEFAULT_ALERT_RULES, type AlertRuleConfig } from "./alerts";
-import type { ServerConfig } from "./config";
+import { UNIDENTIFIED_REVISION, type ServerConfig } from "./config";
 import { INGEST_MAX_PAYLOAD_BYTES, ingestPlugin, type IngestCounters } from "./ingest";
 import { readsPlugin } from "./reads";
 import { VitalsStore } from "./store";
@@ -126,22 +126,34 @@ export async function buildApp(config: ServerConfig, options: BuildAppOptions = 
     {
       schema: {
         summary: "Liveness probe",
-        description: "Process status, uptime in seconds, and package version.",
+        description:
+          "Process status, uptime in seconds, package version, and the commit this " +
+          "build came from — `unidentified` when BUILD_REVISION was not set.",
         response: {
           200: {
             type: "object",
             additionalProperties: false,
-            required: ["status", "uptimeSec", "version"],
+            required: ["status", "uptimeSec", "version", "revision"],
             properties: {
               status: { type: "string", enum: ["ok"] },
               uptimeSec: { type: "number", minimum: 0 },
               version: { type: "string" },
+              revision: { type: "string" },
             },
           },
         },
       },
     },
-    async () => ({ status: "ok" as const, uptimeSec: process.uptime(), version: packageVersion }),
+    // `revision` is what makes "is this container running this commit" a
+    // question with an answer: the same build argument becomes this value and
+    // the image's org.opencontainers.image.revision label, and a stale layer
+    // shows up as the two disagreeing (infra/compose-smoke.sh).
+    async () => ({
+      status: "ok" as const,
+      uptimeSec: process.uptime(),
+      version: packageVersion,
+      revision: config.BUILD_REVISION ?? UNIDENTIFIED_REVISION,
+    }),
   );
 
   return app;
