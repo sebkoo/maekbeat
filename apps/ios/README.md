@@ -35,7 +35,7 @@ It is the iOS analogue of `apps/web/src/main.tsx`, one target further out — an
 apps/ios/scripts/lint.sh        # SwiftLint --strict
 apps/ios/scripts/build-app.sh   # the app shell compiles and links for a simulator
 apps/ios/scripts/test.sh        # XCTest on a simulator + the coverage gate
-cd apps/ios/MaekbeatKit && swift test   # the fast local loop; no simulator, no UI tests
+apps/ios/scripts/fast.sh        # the fast local loop — prints what it does not cover
 ```
 
 ## The BLE link (C15)

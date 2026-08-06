@@ -32,3 +32,6 @@ xcodebuild test \
   CODE_SIGNING_ALLOWED=NO
 
 "$here/coverage-gate.sh" "$result"
+
+# What the simulator cannot run, named rather than assumed.
+"$here/scope-notice.sh" simulator

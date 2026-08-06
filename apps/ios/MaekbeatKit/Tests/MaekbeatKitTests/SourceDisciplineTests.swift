@@ -323,6 +323,44 @@ final class SourceDisciplineTests: XCTestCase {
         )
     }
 
+    // MARK: - No command is documented as verifying more than it does
+
+    /// The fast loop cannot compile the UIKit render tests, so a bare
+    /// `swift test` is a green check over part of the package. It was the
+    /// documented loop until a state-type change broke a file it does not
+    /// compile and only the simulator gate noticed.
+    ///
+    /// `scripts/fast.sh` runs the same thing and prints what it skipped,
+    /// derived from the platform guards rather than from a list. This keeps the
+    /// README pointing at that rather than drifting back to the bare command.
+    func testTheReadmeDocumentsTheFastLoopThatStatesItsOwnScope() throws {
+        var url = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { url = url.deletingLastPathComponent() }
+        let readme = try String(
+            contentsOf: url.appendingPathComponent("README.md"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(readme.contains("scripts/fast.sh"), "the fast loop is not documented")
+        for line in readme.split(separator: "\n") where line.contains("swift test") {
+            XCTAssertTrue(
+                line.contains("fast.sh") || line.contains("not the gate"),
+                "README documents a bare `swift test`, which compiles less than it looks: \(line)"
+            )
+        }
+
+        // And the notice the loop prints has to exist to be printed.
+        let scripts = url.appendingPathComponent("scripts")
+        for script in ["fast.sh", "scope-notice.sh"] {
+            XCTAssertTrue(
+                FileManager.default.isExecutableFile(
+                    atPath: scripts.appendingPathComponent(script).path
+                ),
+                "\(script) is missing or not executable"
+            )
+        }
+    }
+
     // MARK: - The app target stays a shell
 
     /// Everything the app does lives in the library, because the library is

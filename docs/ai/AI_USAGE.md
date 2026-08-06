@@ -131,7 +131,17 @@ The writing-time proof above assumes the test suite is what can be wrong. Often
 it is. But when a mutation cannot be caught, the first question is not "which
 test is missing" — it is **whether the mutated thing should exist at all.**
 
-Work the branches in order, and take the first that can be answered:
+Ask it in this order, and do not skip the first step.
+
+**Step 1 — a NOT CAUGHT result is a claim about the harness before it is a claim
+about the code.** Verify the mutation actually took effect: every build
+configuration, every copy of the pattern, the file the process really reads, the
+platform that really compiles it. Then re-run. A mutation that did not land
+looks exactly like dead state, and the two want opposite responses.
+
+**Step 2 — only once the mutation is confirmed real** does the question about
+the code apply. Work the branches in order and take the first that can be
+answered:
 
 - **(a) Does it change anything observable?** A request payload, a log line, a
   displayed value, a returned case — anything a test could see. If yes, write
@@ -149,6 +159,20 @@ about its own internals. Reaching for (c) when the answer is (b) deletes a guard
 whose scenario nobody had staged yet. The order matters, and so does writing
 down which branch was taken — C15 took all three for one field and the reasoning
 is in that commit and in [mutation-log.md](mutation-log.md).
+
+Step 1 is here because this rule shipped without it and the hole showed up the
+same day. Two mutations against the app target's Info.plist keys reported NOT
+CAUGHT, and the guard was fine: `project.pbxproj` declares each key once per
+build configuration, and the harness replaced only the first occurrence, so the
+Debug copy went away while the Release copy kept the assertion green. Applied to
+that false NOT CAUGHT, step 2 alone deletes a working guard — the branches would
+have asked whether a key nothing seemed to observe should exist, and the answer
+would have been wrong. Both were caught once the mutation removed both copies.
+
+The failure mode generalises past `.pbxproj`: a pattern duplicated across two
+files, a constant read from an environment the test does not set, a file behind
+a platform guard the fast loop does not compile. In each case the harness is
+reporting on something it never changed.
 
 ## No-trailer policy
 

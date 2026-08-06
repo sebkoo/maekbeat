@@ -489,3 +489,33 @@ Two things were deleted rather than tested, and that is the part worth keeping:
 a second filter for a state that cannot occur, and a computed property only its
 own tests read. Writing tests for either would have pinned internals nothing
 observes, and left two pieces of parallel truth to drift.
+
+## The fast loop states its own scope
+
+The C15 remodel broke `ViewRenderingTests` and `swift test` on macOS did not
+notice, because that file is behind `#if canImport(UIKit)` and the fast loop
+never compiles it. Only the simulator gate said so. The footnote recording that
+had been in apps/ios/README.md the whole time, which is the problem: a green
+check that verifies less than it appears to gets trusted eventually, and a
+document is not a mechanism.
+
+Neither command in the package is complete, and the gaps point opposite ways —
+the macOS loop cannot compile the UIKit render tests, and the simulator gate
+cannot spawn the process the integration suite needs. So each run now prints
+what it did not compile, derived from the platform guards in the sources rather
+than from a list somebody must remember to update, and `scripts/fast.sh`
+refuses to run under CI.
+
+| Guard                                             | Own mutation                                 | Neighbour mutation                  | Result                                      |
+| ------------------------------------------------- | -------------------------------------------- | ----------------------------------- | ------------------------------------------- |
+| the README documents a loop that states its scope | point it back at a bare `swift test`         | remove the fast-loop script from it | caught                                      |
+| the loop always prints its scope                  | drop the notice call from `fast.sh`          | —                                   | caught                                      |
+| the notice is derived, not hard-coded             | put a new file behind `#if canImport(UIKit)` | —                                   | the notice listed it — derivation confirmed |
+| the loop is not a gate                            | run it with `CI=1`                           | —                                   | refuses, exit 1                             |
+
+The third row is worth reading as written. It is not a caught mutation, because
+the notice is not an assertion — it is output, and the check is that the output
+changed. Adding a guard to `GattProfileTests.swift` made the notice list it
+immediately; reverting removed it. That is the property the row claims, verified
+directly rather than through a pass/fail the harness could misread — which is
+the same lesson as the `.pbxproj` episode one section up, applied before it bit.
