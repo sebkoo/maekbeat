@@ -23,8 +23,18 @@ describe("VitalsStore ingest", () => {
     const first = store.ingest(frame({ seq: 0 }), 5_000);
     const second = store.ingest(frame({ seq: 1, capturedAtMs: 2_000 }), 5_001);
 
-    expect(first).toEqual({ kind: "accepted", sessionEpoch: 1, newSession: true });
-    expect(second).toEqual({ kind: "accepted", sessionEpoch: 1, newSession: false });
+    expect(first).toEqual({
+      kind: "accepted",
+      sessionEpoch: 1,
+      newSession: true,
+      outOfOrder: false,
+    });
+    expect(second).toEqual({
+      kind: "accepted",
+      sessionEpoch: 1,
+      newSession: false,
+      outOfOrder: false,
+    });
 
     const frames = store.readFrames("dev-a", { limit: 10 });
     expect(frames).toHaveLength(2);
@@ -37,7 +47,8 @@ describe("VitalsStore ingest", () => {
     store.ingest(frame({ seq: 3 }), 5_000);
     const result = store.ingest(frame({ seq: 3 }), 5_001);
 
-    expect(result).toEqual({ kind: "duplicate", sessionEpoch: 1 });
+    // A retransmit of the newest seq: a duplicate, but not a late arrival.
+    expect(result).toEqual({ kind: "duplicate", sessionEpoch: 1, outOfOrder: false });
     expect(store.readFrames("dev-a", { limit: 10 })).toHaveLength(1);
     expect(store.stats.duplicatesDropped).toBe(1);
     expect(store.listDevices()[0]?.duplicatesDropped).toBe(1);
@@ -49,8 +60,13 @@ describe("VitalsStore ingest", () => {
     const late = store.ingest(frame({ seq: 8, capturedAtMs: 8_000 }), 5_001);
     const retransmit = store.ingest(frame({ seq: 8, capturedAtMs: 8_000 }), 5_002);
 
-    expect(late).toEqual({ kind: "accepted", sessionEpoch: 1, newSession: false });
-    expect(retransmit).toEqual({ kind: "duplicate", sessionEpoch: 1 });
+    expect(late).toEqual({
+      kind: "accepted",
+      sessionEpoch: 1,
+      newSession: false,
+      outOfOrder: true,
+    });
+    expect(retransmit).toEqual({ kind: "duplicate", sessionEpoch: 1, outOfOrder: true });
     expect(store.readFrames("dev-a", { limit: 10 })).toHaveLength(2);
   });
 
@@ -60,13 +76,24 @@ describe("VitalsStore ingest", () => {
     store.ingest(frame({ seq: high, capturedAtMs: 100_000 }), 5_000);
     const reboot = store.ingest(frame({ seq: 0, capturedAtMs: 200_000 }), 6_000);
 
-    expect(reboot).toEqual({ kind: "accepted", sessionEpoch: 2, newSession: true });
+    // A reboot is a new session, not a late frame — the two are reported apart.
+    expect(reboot).toEqual({
+      kind: "accepted",
+      sessionEpoch: 2,
+      newSession: true,
+      outOfOrder: false,
+    });
     expect(store.stats.sessionsStarted).toBe(2);
     // The old session's frames stay in the buffer as history.
     expect(store.readFrames("dev-a", { limit: 10 })).toHaveLength(2);
     // seq 0 in the new epoch is not a duplicate of anything from epoch 1.
     const next = store.ingest(frame({ seq: 1, capturedAtMs: 200_001 }), 6_001);
-    expect(next).toEqual({ kind: "accepted", sessionEpoch: 2, newSession: false });
+    expect(next).toEqual({
+      kind: "accepted",
+      sessionEpoch: 2,
+      newSession: false,
+      outOfOrder: false,
+    });
   });
 
   it("treats a regression at the window edge as in-session, one past it as a reboot", () => {
@@ -78,13 +105,23 @@ describe("VitalsStore ingest", () => {
       frame({ seq: high - SEQ_REORDER_WINDOW, capturedAtMs: 90_000 }),
       5_001,
     );
-    expect(edge).toEqual({ kind: "accepted", sessionEpoch: 1, newSession: false });
+    expect(edge).toEqual({
+      kind: "accepted",
+      sessionEpoch: 1,
+      newSession: false,
+      outOfOrder: true,
+    });
 
     const past = store.ingest(
       frame({ seq: high - SEQ_REORDER_WINDOW - 1, capturedAtMs: 90_000 }),
       5_002,
     );
-    expect(past).toEqual({ kind: "accepted", sessionEpoch: 2, newSession: true });
+    expect(past).toEqual({
+      kind: "accepted",
+      sessionEpoch: 2,
+      newSession: true,
+      outOfOrder: false,
+    });
   });
 
   it("dedupes retransmits of frames already evicted from the ring", () => {
@@ -94,7 +131,7 @@ describe("VitalsStore ingest", () => {
     store.ingest(frame({ seq: 12, capturedAtMs: 3_000 }), 5_002);
     // seq 10 is evicted (capacity 2) but still within the seq window: duplicate.
     const retransmit = store.ingest(frame({ seq: 10, capturedAtMs: 1_000 }), 5_003);
-    expect(retransmit).toEqual({ kind: "duplicate", sessionEpoch: 1 });
+    expect(retransmit).toEqual({ kind: "duplicate", sessionEpoch: 1, outOfOrder: true });
   });
 
   it("evicts the oldest arrival at capacity", () => {

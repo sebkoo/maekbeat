@@ -1,6 +1,6 @@
 # @maekbeat/server
 
-The Maekbeat API server, C5–C12a of [docs/ROADMAP.md](../../docs/ROADMAP.md): WebSocket vitals ingest validated against [@maekbeat/protocol](../../packages/protocol), a bounded per-device ring buffer, a sliding-window alert engine, REST reads, and the WebSocket fan-out that feeds [apps/web](../web) — all in the OpenAPI document.
+The Maekbeat API server, C5–C18 of [docs/ROADMAP.md](../../docs/ROADMAP.md): WebSocket vitals ingest validated against [@maekbeat/protocol](../../packages/protocol), a bounded per-device ring buffer, a sliding-window alert engine, REST reads, the WebSocket fan-out that feeds [apps/web](../web) — all in the OpenAPI document — and OpenTelemetry spans over that path.
 
 ## Run it
 
@@ -93,26 +93,39 @@ The store ([src/store.ts](src/store.ts)) keeps at most `RING_CAPACITY` frames pe
 - `GET /devices/:deviceId/stream` — the WebSocket fan-out above (see [src/stream.ts](src/stream.ts)).
 - `GET /healthz` — status, uptime, version. Swagger UI at `/docs` when `NODE_ENV=development`; [src/openapi.test.ts](src/openapi.test.ts) pins the exact route list.
 
+## Tracing — instrumented, not observable (since C18)
+
+The ingest path emits OpenTelemetry spans ([src/tracing.ts](src/tracing.ts), created in [src/ingest.ts](src/ingest.ts)). This is instrumentation: no collector is deployed and no backend is stood up here, so nothing in this repository makes the running system observable.
+
+One trace per frame, rooted at `ingest.frame` because nothing upstream propagates trace context. Its children are `ingest.validate`, `store.ingest`, `alert.evaluate` and `stream.fanout`; each lifecycle transition is an `alert.transition` grandchild under the evaluation that produced it. Every parent is passed explicitly rather than taken from an ambient context, and [src/tracing.shape.test.ts](src/tracing.shape.test.ts) asserts the tree by span id — a name check would pass a pile of correctly-named roots.
+
+Attributes never carry a measured value. The full set is `deviceId`, `seq`, the session epoch, the duplicate and out-of-order flags, the ingest outcome, the validate and store results, the transition count, and per alert its id, lifecycle state, metric and direction — enumerated once in `SPAN_ATTRIBUTES` ([src/tracing.ts](src/tracing.ts)), which the privacy test reads rather than copies. "Never a measured value" is the honest phrasing rather than "identifiers only": the alert id embeds the rule that fired, so an alert span does say a device had a low-SpO2 episode. Heart rate, SpO2, respiration and motion never appear (docs/DECISIONS.md #20). `alert.transition` spans carry `raised` and `resolved` only — an episode's `ongoing` frames update the record in place and do not cross the fan-out seam, so no transition event exists for them.
+
+Off unless `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set: the provider then holds no span processor at all, so there is no exporter, no batch queue and no timer, and every span is non-recording. On `SIGTERM` the server is closed first and the tracer provider flushed second, so spans from requests still draining are exported rather than dropped ([src/lifecycle.ts](src/lifecycle.ts)). A flush that cannot reach its collector is logged and does not fail the stop — otherwise a server that carried traffic would exit non-zero on every deploy while the collector was down, and an idle one would exit clean.
+
 ## Test map
 
 One row per test file, mapping it to the behaviors it pins — the file-to-behavior half of the C20 traceability story, wired before requirement IDs exist. Property suites run on fixed seeds with fixed iteration counts, so CI is deterministic; the review attacks from C6 and C7 live on here as regression tests, not as one-off session artifacts.
 
-| File                                                       | Pins                                                                                                                         |
-| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| [src/config.test.ts](src/config.test.ts)                   | env defaults and overrides; invalid values rejected with the variable named                                                  |
-| [src/app.test.ts](src/app.test.ts)                         | /healthz body and version; central error handler masks 5xx outside development, passes 4xx through                           |
-| [src/store.test.ts](src/store.test.ts)                     | dedupe identity, reorder-window edges, reboot epochs, eviction, read ordering                                                |
-| [src/store.property.test.ts](src/store.property.test.ts)   | seeded seq-pattern attacks vs a docs/DECISIONS.md #11 oracle — 5 seeds × 400 rounds × 2 devices × 2 capacities               |
-| [src/alerts.test.ts](src/alerts.test.ts)                   | lifecycle, hysteresis, cooldown latch, monotonic window clock, golden transition ticks, 10-seed silence sweep                |
-| [src/alerts.property.test.ts](src/alerts.property.test.ts) | clock-regression fuzz (10 seeds × 400 frames): alternation, timestamp order, monotonicized-clock equivalence; frozen clock   |
-| [src/ingest.test.ts](src/ingest.test.ts)                   | per-message WS replies, reject-never-closes, dedupe-before-engine seam, HTTP 426, close 1009                                 |
-| [src/failures.test.ts](src/failures.test.ts)               | mid-stream drop then reconnect (same epoch resumes), malformed burst continuation, post-1009 state intact                    |
-| [src/isolation.test.ts](src/isolation.test.ts)             | parallel sockets with interleaved devices: no window, session, or counter bleed across devices                               |
-| [src/journey.test.ts](src/journey.test.ts)                 | vitals-sim → WS client → ingest → engine → REST anomaly journey, DEFAULT_ALERT_RULES unscaled                                |
-| [src/reads.test.ts](src/reads.test.ts)                     | REST read ordering, since/limit, 404 shape, wire-contract drift guards                                                       |
-| [src/stream.test.ts](src/stream.test.ts)                   | fan-out isolation per device, unsubscribe on close, a broken subscriber not breaking ingest, frame-before-its-alert order    |
-| [src/acks.test.ts](src/acks.test.ts)                       | append-only log, decisions in force, retention by eviction, the decision route, its 404 and 400 paths, fan-out of a decision |
-| [src/openapi.test.ts](src/openapi.test.ts)                 | exact route surface in the OpenAPI document, Swagger UI mounted in development only                                          |
+| File                                                           | Pins                                                                                                                           |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| [src/config.test.ts](src/config.test.ts)                       | env defaults and overrides; invalid values rejected with the variable named                                                    |
+| [src/app.test.ts](src/app.test.ts)                             | /healthz body and version; central error handler masks 5xx outside development, passes 4xx through                             |
+| [src/store.test.ts](src/store.test.ts)                         | dedupe identity, reorder-window edges, reboot epochs, eviction, read ordering                                                  |
+| [src/store.property.test.ts](src/store.property.test.ts)       | seeded seq-pattern attacks vs a docs/DECISIONS.md #11 oracle — 5 seeds × 400 rounds × 2 devices × 2 capacities                 |
+| [src/alerts.test.ts](src/alerts.test.ts)                       | lifecycle, hysteresis, cooldown latch, monotonic window clock, golden transition ticks, 10-seed silence sweep                  |
+| [src/alerts.property.test.ts](src/alerts.property.test.ts)     | clock-regression fuzz (10 seeds × 400 frames): alternation, timestamp order, monotonicized-clock equivalence; frozen clock     |
+| [src/ingest.test.ts](src/ingest.test.ts)                       | per-message WS replies, reject-never-closes, dedupe-before-engine seam, HTTP 426, close 1009                                   |
+| [src/failures.test.ts](src/failures.test.ts)                   | mid-stream drop then reconnect (same epoch resumes), malformed burst continuation, post-1009 state intact                      |
+| [src/isolation.test.ts](src/isolation.test.ts)                 | parallel sockets with interleaved devices: no window, session, or counter bleed across devices                                 |
+| [src/journey.test.ts](src/journey.test.ts)                     | vitals-sim → WS client → ingest → engine → REST anomaly journey, DEFAULT_ALERT_RULES unscaled                                  |
+| [src/reads.test.ts](src/reads.test.ts)                         | REST read ordering, since/limit, 404 shape, wire-contract drift guards                                                         |
+| [src/stream.test.ts](src/stream.test.ts)                       | fan-out isolation per device, unsubscribe on close, a broken subscriber not breaking ingest, frame-before-its-alert order      |
+| [src/acks.test.ts](src/acks.test.ts)                           | append-only log, decisions in force, retention by eviction, the decision route, its 404 and 400 paths, fan-out of a decision   |
+| [src/openapi.test.ts](src/openapi.test.ts)                     | exact route surface in the OpenAPI document, Swagger UI mounted in development only                                            |
+| [src/lifecycle.test.ts](src/lifecycle.test.ts)                 | shutdown order (server closed before tracing flushed), no exit on the clean path, non-zero exit on a failed one                |
+| [src/tracing.shape.test.ts](src/tracing.shape.test.ts)         | span parentage by span id over a golden replay, arrival attributes, identifiers-not-readings, traced vs untraced alert bytes   |
+| [src/tracing.lifecycle.test.ts](src/tracing.lifecycle.test.ts) | off wires no span processor; SIGTERM flushes over real OTLP/HTTP and the process exits on its own with a client still attached |
 
 Coverage is measured with `pnpm --filter @maekbeat/server test:coverage` ([vitest.config.ts](vitest.config.ts), v8 provider, all of src/ minus tests in the denominator — including the uncovered process entry [src/main.ts](src/main.ts); the one file outside the gate is the demo wiring, [scripts/demo.ts](scripts/demo.ts)). Since C9 the config carries thresholds set just under the measured floor, and the CI tests job runs the coverage-enabled suite, so a regression fails the build. Thresholds are a ratchet — they move only up, never down, never via new exclusions or narrowed globs (policy: [CLAUDE.md](../../CLAUDE.md)).
 
@@ -120,17 +133,19 @@ The gate and the reporting are separate things, and C10 separated them in CI ([.
 
 ## Configuration
 
-| Variable        | Default       | Values                                                 |
-| --------------- | ------------- | ------------------------------------------------------ |
-| `HOST`          | `127.0.0.1`   | bind address; use `0.0.0.0` in containers              |
-| `PORT`          | `3000`        | integer, 1–65535                                       |
-| `LOG_LEVEL`     | `info`        | `fatal` `error` `warn` `info` `debug` `trace` `silent` |
-| `NODE_ENV`      | `development` | `development` `test` `production`                      |
-| `RING_CAPACITY` | `1024`        | frames kept per device, 1–65536                        |
-| `CORS_ORIGIN`   | `*`           | browser origins allowed to read: `*` or a comma list   |
+| Variable                             | Default           | Values                                                 |
+| ------------------------------------ | ----------------- | ------------------------------------------------------ |
+| `HOST`                               | `127.0.0.1`       | bind address; use `0.0.0.0` in containers              |
+| `PORT`                               | `3000`            | integer, 1–65535                                       |
+| `LOG_LEVEL`                          | `info`            | `fatal` `error` `warn` `info` `debug` `trace` `silent` |
+| `NODE_ENV`                           | `development`     | `development` `test` `production`                      |
+| `RING_CAPACITY`                      | `1024`            | frames kept per device, 1–65536                        |
+| `CORS_ORIGIN`                        | `*`               | browser origins allowed to read: `*` or a comma list   |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | unset             | http(s) URL; unset means tracing is off entirely       |
+| `OTEL_SERVICE_NAME`                  | `maekbeat-server` | `service.name` on every exported span                  |
 
 Configuration is read from `process.env` only ([src/config.ts](src/config.ts)); [.env.example](.env.example) documents each variable and holds no secrets. To use a file, copy it to `.env` and pass `--env-file=.env` to Node, or export the variables in the shell.
 
 ## Skeleton (C5)
 
-[src/app.ts](src/app.ts) carries the C5 base: pino logging, a central error handler that masks 5xx details outside development, @fastify/swagger. [src/main.ts](src/main.ts) handles startup and graceful shutdown — SIGTERM/SIGINT drain in-flight requests via `app.close()`, the same signal path an ECS task stop will use (infra planned — C19).
+[src/app.ts](src/app.ts) carries the C5 base: pino logging, a central error handler that masks 5xx details outside development, @fastify/swagger. [src/main.ts](src/main.ts) is composition only; the shutdown sequence moved to [src/lifecycle.ts](src/lifecycle.ts) at C18, where it is tested — SIGTERM/SIGINT drain in-flight requests via `app.close()` and then flush the tracer provider, the same signal path an ECS task stop will use (infra planned — C19).

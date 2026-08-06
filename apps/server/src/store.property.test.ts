@@ -31,6 +31,12 @@ function frame(deviceId: string, seq: number): VitalsFrame {
  * reorder window is a reboot (new epoch); a seq already accepted in the
  * current epoch and still inside the window is a duplicate; everything else
  * is accepted in-session.
+ *
+ * `outOfOrder` (C18) is derived here the same way — a seq below the epoch's
+ * high-water mark, judged before the arrival moves it — so the flag the ingest
+ * span carries is pinned by the attack mix rather than by the six hand-written
+ * cases in store.test.ts. A first frame and a reboot are never out of order:
+ * they define a high-water mark rather than arriving behind one.
  */
 interface DeviceModel {
   epoch: number;
@@ -43,17 +49,24 @@ interface DeviceModel {
 function oracle(
   model: DeviceModel | undefined,
   seq: number,
-): { kind: "accepted"; epoch: number; newSession: boolean } | { kind: "duplicate"; epoch: number } {
+):
+  | { kind: "accepted"; epoch: number; newSession: boolean; outOfOrder: boolean }
+  | { kind: "duplicate"; epoch: number; outOfOrder: boolean } {
   if (model === undefined) {
-    return { kind: "accepted", epoch: 1, newSession: true };
+    return { kind: "accepted", epoch: 1, newSession: true, outOfOrder: false };
   }
   if (seq < model.high - SEQ_REORDER_WINDOW) {
-    return { kind: "accepted", epoch: model.epoch + 1, newSession: true };
+    return { kind: "accepted", epoch: model.epoch + 1, newSession: true, outOfOrder: false };
   }
   if (model.accepted.has(`${model.epoch}:${seq}`)) {
-    return { kind: "duplicate", epoch: model.epoch };
+    return { kind: "duplicate", epoch: model.epoch, outOfOrder: seq < model.high };
   }
-  return { kind: "accepted", epoch: model.epoch, newSession: false };
+  return {
+    kind: "accepted",
+    epoch: model.epoch,
+    newSession: false,
+    outOfOrder: seq < model.high,
+  };
 }
 
 function applyToModel(models: Map<string, DeviceModel>, deviceId: string, seq: number): void {
@@ -131,9 +144,14 @@ describe.each([{ capacity: 4096 }, { capacity: 32 }])(
                 kind: "accepted",
                 sessionEpoch: expected.epoch,
                 newSession: expected.newSession,
+                outOfOrder: expected.outOfOrder,
               });
             } else {
-              expect(result).toEqual({ kind: "duplicate", sessionEpoch: expected.epoch });
+              expect(result).toEqual({
+                kind: "duplicate",
+                sessionEpoch: expected.epoch,
+                outOfOrder: expected.outOfOrder,
+              });
             }
 
             applyToModel(models, deviceId, seq);

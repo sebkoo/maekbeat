@@ -21,6 +21,29 @@ const envSchema = z.object({
    * (README, "Declared limits"); a deployment with real origins sets the list.
    */
   CORS_ORIGIN: z.string().trim().min(1).default("*"),
+  /**
+   * OTLP/HTTP traces endpoint. Its presence is the entire on switch: unset,
+   * the server builds no exporter, no span processor and no batch timer, and
+   * every span it starts is non-recording (src/tracing.ts). The name is the
+   * OpenTelemetry standard one so an operator can reuse what they already
+   * know, but it is declared here like every other variable — the environment
+   * contract stays one schema, never half here and half inside an SDK.
+   *
+   * The scheme is checked explicitly rather than by URL parsing alone:
+   * `new URL("collector:4318")` parses happily — scheme "collector", path
+   * "4318" — so a bare host:port would start a server that looks instrumented
+   * and exports to nowhere. The test is case-insensitive because URL schemes
+   * are, and rejecting `HTTPS://` would be rejecting a valid endpoint.
+   */
+  OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: z
+    .string()
+    .trim()
+    .refine((value) => /^https?:\/\//i.test(value) && URL.canParse(value), {
+      message: "must be an http(s) URL, e.g. http://collector:4318/v1/traces",
+    })
+    .optional(),
+  /** Resource `service.name` on every exported span. */
+  OTEL_SERVICE_NAME: z.string().trim().min(1).default("maekbeat-server"),
 });
 
 export type ServerConfig = z.infer<typeof envSchema>;

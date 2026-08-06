@@ -11,7 +11,12 @@ describe("loadConfig", () => {
       LOG_LEVEL: "info",
       RING_CAPACITY: 1024,
       CORS_ORIGIN: "*",
+      // Tracing is off by default, and off is the absence of an endpoint
+      // rather than a boolean beside one: there is no configuration in which
+      // an endpoint is set and unused (src/tracing.ts).
+      OTEL_SERVICE_NAME: "maekbeat-server",
     });
+    expect(loadConfig({})).not.toHaveProperty("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT");
   });
 
   it("applies overrides from the environment", () => {
@@ -23,6 +28,8 @@ describe("loadConfig", () => {
         LOG_LEVEL: "debug",
         RING_CAPACITY: "512",
         CORS_ORIGIN: "https://dash.example",
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://collector.example:4318/v1/traces",
+        OTEL_SERVICE_NAME: "maekbeat-server-eu",
       }),
     ).toEqual({
       NODE_ENV: "production",
@@ -31,7 +38,17 @@ describe("loadConfig", () => {
       LOG_LEVEL: "debug",
       RING_CAPACITY: 512,
       CORS_ORIGIN: "https://dash.example",
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://collector.example:4318/v1/traces",
+      OTEL_SERVICE_NAME: "maekbeat-server-eu",
     });
+  });
+
+  it("rejects an OTLP endpoint that is not a URL, naming the variable", () => {
+    // A half-configured exporter is worse than none: the server would start,
+    // look instrumented, and export nowhere.
+    expect(() => loadConfig({ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "collector:4318" })).toThrow(
+      /OTEL_EXPORTER_OTLP_TRACES_ENDPOINT/,
+    );
   });
 
   it("ignores unrelated environment variables", () => {

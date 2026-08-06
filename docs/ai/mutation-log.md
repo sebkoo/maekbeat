@@ -678,3 +678,91 @@ zeroed whichever timer had since taken slot 0. A spent canceller silently
 killing a live deadline can only ever turn a red into a green. No existing test
 was wrong because of it; the property suite, which cancels and fires hundreds of
 times in one run, is what made it matter. Now keyed by ticket.
+
+## C18 — OpenTelemetry tracing across ingest, alert, and fan-out
+
+The guard that matters here is not "a span was emitted". Every orphan-span
+integration emits spans, names them correctly, and passes its unit tests. So
+each mutation below is aimed at the causal structure or at the attribute
+contract, and the neighbour column names a guard that had to stay green — a
+parentage mutation that also broke the attribute assertions would prove only
+that the tests are entangled.
+
+| Guard                                  | Mutation                                                                                                 | Fails                                                                                                            | Neighbour that stayed green                                            | Result |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ------ |
+| a transition is a grandchild           | start `alert.transition` as a root instead of under `alert.evaluate`                                     | parentage by span id; the "each ingest span its own root" count; the transition-count tie                        | every attribute assertion, the arrival suite, traced-vs-untraced bytes | caught |
+| the transition carries its state       | drop the `alert.state` attribute                                                                         | transition attributes; the raised-then-resolved replay assertion                                                 | all four parentage assertions                                          | caught |
+| no reading reaches an attribute        | write `spo2Pct` (97.5) into a declared attribute                                                         | the numeric gate — every span attribute must be a non-negative integer                                           | parentage, arrival flags, alert attributes                             | caught |
+| no reading reaches an attribute        | write `heartRateBpm` (62, an integer) into the `seq` attribute                                           | identifier pinning on the ingest span; the arrival-flag table                                                    | parentage, privacy key allowlist                                       | caught |
+| off means off                          | build the OTLP exporter unconditionally                                                                  | the provider then reports a BatchSpanProcessor where the disabled one reports none                               | the tracing-on flush-and-exit proof                                    | caught |
+| off means off                          | arm a BatchSpanProcessor inside the DISABLED provider                                                    | the same assertion, with `enabled` still reporting false — the isolating form of the above                       | the tracing-on positive control                                        | caught |
+| flush after the server closes          | swap the order to flush first, then close                                                                | the shutdown-order assertions in the lifecycle suite                                                             | the tracing shape and privacy suites                                   | caught |
+| a late arrival is reported as late     | make the store return `outOfOrder: false` for accepted frames                                            | store cases, the DECISIONS #11 property oracle, the arrival-flag span table                                      | parentage, alert attributes, privacy                                   | caught |
+| the coverage ratchet bites             | raise the statements threshold to 98, above the measured 96.94                                           | `pnpm --filter @maekbeat/server test:coverage` fails with every test still passing                               | —                                                                      | caught |
+| the server stops with clients attached | drop `app.close()` from the shutdown sequence entirely                                                   | the spawned server never exits; the open-socket proof fails on its own 60 s timeout                              | —                                                                      | caught |
+| a transition names its own alert       | rewrite the raise ordinal inside the `alertId` attribute                                                 | the transition-attribute assertion, cross-checked against the REST alert history                                 | parentage, privacy, arrival flags                                      | caught |
+| a child belongs to ITS frame           | reuse one ingest context for every frame on the socket                                                   | per-parent child counts, the per-frame subtree walk, the numeric-attribute contract, the duplicate-subtree check | —                                                                      | caught |
+| no reading in an unpinned slot         | write the integer heart rate into `seq` on the validate span AND into `message_count` on the ingest span | the total numeric-attribute assertion                                                                            | key allowlist and key-name regex both stay green, which is the point   | caught |
+| a crashed frame is not green           | (verified directly) make the engine throw mid-handler                                                    | the ingest span carries ERROR, an `exception` event and `outcome=error`, and the open child is closed            | —                                                                      | caught |
+
+Two of these are worth naming beyond the table.
+
+The privacy gate needed two mutations, not one, and the second is the reason
+the first is not enough. A fractional reading — SpO2 97.5, respiration 13.7,
+motion 0.003 — fails the "every numeric attribute is a non-negative integer"
+rule outright, and 119 of the 164 distinct reading values in the anomaly
+fixture are fractional. Heart rate is not: it is an integer, and it slides
+through that rule untouched. What catches it is the separate assertion that
+every numeric attribute equals something the replay derives independently —
+the frame's own `seq`, the session epoch, the count of a span's actual
+children. A gate built only on the shape of the value would have had a hole
+exactly the width of one vitals channel.
+
+The unconditional-exporter mutation failed in a way that was not designed for,
+and the surprise turned out to be a defect in the shipping code rather than a
+bonus signal. With no endpoint configured the exporter defaults to
+`localhost:4318`, nothing is listening, and the flush on shutdown failed — so
+the spawned server exited 1 instead of 0. Chased down, that is not specific to
+the mutation at all: **any** server whose collector is unreachable exited
+non-zero on SIGTERM, and only if it had carried enough traffic to have spans
+buffered. A server that did its job failed its stop; an idle one stopped clean.
+`shutdown` now logs a failed flush and lets the stop succeed, and
+src/lifecycle.test.ts pins both halves.
+
+The first version of the off-means-off proof was itself vacuous, and an
+adversarial pass caught it rather than a mutation: it compared
+`process.getActiveResourcesInfo()` before and after, and both sides were empty
+whether tracing was on or off, because `BatchSpanProcessor` calls `unref()` on
+its batch timer and an unref'd handle never appears in that list. The
+assertion could not have failed. It now asks the provider which span
+processors it holds, with an enabled provider as the positive control — and
+the second row above is the mutation that proves the new form is not vacuous
+in turn.
+
+Three of the C18 rows exist because an adversarial pass found the first version
+of the proof unable to fail, which is the same lesson C12 recorded and worth
+recording again in its new shape.
+
+The headline parentage assertion compared each child's `traceId` to its
+parent's. That is a tautology: the SDK derives a child's trace id **from** the
+parent context it was handed, so once the span-id link holds the trace ids
+cannot differ. Underneath it, the real assertion only said "the parent is some
+ingest span" — so hoisting the context out of the message handler, which
+parents all 480 children onto the first frame's span, passed the entire suite.
+Every span emitted, correctly named, correctly nested, and every one of them
+attributed to the wrong frame. That is the orphan-span failure wearing a
+different coat, and the file written to reject it accepted it.
+
+The privacy gate had a hole exactly one vitals channel wide. Of the four
+channels, SpO2, respiration and motion are fractional in almost every fixture
+frame, so "every numeric attribute is a non-negative integer" catches them.
+Heart rate is an integer in all 120, and the pinning that was supposed to cover
+it listed only five span-and-key pairs. Writing a heart rate into any other
+pairing — `seq` on the validate span, `message_count` on the ingest span — put
+120 real heart rates on the wire with all four assertions green.
+
+Both are now total rather than enumerated: children are checked per parent and
+by walking each frame's subtree, and every numeric attribute on every span is
+compared by exact equality against what the replay derives for that span. The
+general form of the lesson: a gate written as a list of the cases you thought
+of is a gate with a hole the shape of the case you did not.

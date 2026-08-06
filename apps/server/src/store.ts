@@ -14,9 +14,17 @@ export type { StoredVitalsFrame };
  */
 export const SEQ_REORDER_WINDOW = 64;
 
+/**
+ * `outOfOrder` is a late arrival inside the current session: a seq below the
+ * highest already accepted for it. A regression past the reorder window is a
+ * reboot, not a late frame, and reports `newSession` instead. The store is the
+ * only thing that knows either, and it used to throw both away — C18 reports
+ * them so the ingest span can carry them (src/tracing.ts). Reporting only:
+ * nothing here branches on the flag.
+ */
 export type IngestResult =
-  | { kind: "accepted"; sessionEpoch: number; newSession: boolean }
-  | { kind: "duplicate"; sessionEpoch: number };
+  | { kind: "accepted"; sessionEpoch: number; newSession: boolean; outOfOrder: boolean }
+  | { kind: "duplicate"; sessionEpoch: number; outOfOrder: boolean };
 
 export interface DeviceSummary {
   deviceId: string;
@@ -64,6 +72,9 @@ export class VitalsStore {
   ingest(frame: VitalsFrame, receivedAtMs: number): IngestResult {
     let device = this.devices.get(frame.deviceId);
     let newSession = false;
+    // Read against highSeq as it stands on arrival, before any branch below
+    // moves it: a first frame and a reboot are not late arrivals.
+    let outOfOrder = false;
 
     if (!device) {
       device = {
@@ -86,7 +97,13 @@ export class VitalsStore {
       device.duplicatesDropped += 1;
       device.lastReceivedAtMs = receivedAtMs;
       this.stats.duplicatesDropped += 1;
-      return { kind: "duplicate", sessionEpoch: device.epoch };
+      return {
+        kind: "duplicate",
+        sessionEpoch: device.epoch,
+        outOfOrder: frame.seq < device.highSeq,
+      };
+    } else {
+      outOfOrder = frame.seq < device.highSeq;
     }
 
     if (newSession) {
@@ -109,7 +126,7 @@ export class VitalsStore {
     }
     device.lastReceivedAtMs = receivedAtMs;
     this.stats.accepted += 1;
-    return { kind: "accepted", sessionEpoch: device.epoch, newSession };
+    return { kind: "accepted", sessionEpoch: device.epoch, newSession, outOfOrder };
   }
 
   listDevices(): DeviceSummary[] {

@@ -23,15 +23,26 @@ export default defineConfig({
       // moves coverage by a rounding margin from reddening the build, while a
       // real regression, which moves it further, still does.
       //
-      // Raised here against a measured 95.16% statements / 95.10% branches /
-      // 95.58% functions / 95.45% lines, with the untested process entry
-      // main.ts counted against every one of them. Previous floor: the C8
-      // measurement of 92.88 / 94.64 / 91.66 / 92.79, gated at 90 / 92 / 89 / 90.
+      // Raised at C18 against a measured 97.05% statements / 95.00% branches /
+      // 100% functions / 97.14% lines, with the untested process entry main.ts
+      // counted against every one of them. Previous floor: the C17 measurement
+      // of 95.16 / 95.10 / 95.58 / 95.45, gated at 93 across.
+      //
+      // Branches stays at 93 rather than rising with the others: 95.00 leaves
+      // room for 93 under the two-point convention and no more, and inventing
+      // headroom that is not there would make the next legitimate refactor red.
+      // A threshold that does not move is the ratchet working, not a lapse —
+      // the rule is that it never moves down.
+      //
+      // C18 raised three of the four by extracting the shutdown sequence out
+      // of main.ts into src/lifecycle.ts, where it is tested: the tracer flush
+      // has an order that matters, and ordering logic sitting in the one file
+      // no test loads is how it would have gone unproven.
       thresholds: {
-        statements: 93,
+        statements: 95,
         branches: 93,
-        functions: 93,
-        lines: 93,
+        functions: 98,
+        lines: 95,
       },
     },
   },

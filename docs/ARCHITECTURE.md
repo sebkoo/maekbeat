@@ -52,6 +52,25 @@ sequenceDiagram
 
 The ingest and processing legs are real since C6–C7 — receivedAtMs stamp and session-scoped dedupe (apps/server/src/ingest.ts, store.ts), the ring buffer as enqueue target, and the alert engine judging each accepted frame (apps/server/src/alerts.ts) — the fan-out leg since C11 (apps/server/src/stream.ts), gateway transport since C14–C15, and the notification leg since C16 (apps/ios). Both TARGETs are end-to-end paths, defined precisely in the budget table below, not budgets for the single leg they annotate.
 
+## Where the spans sit (C18)
+
+The server is instrumented, not observable: apps/server emits OpenTelemetry spans, and this repository deploys no collector and stands up no backend. What exists is the trace structure the C19 measurement will read.
+
+One trace per ingest message — not per accepted frame: the root span opens before validation, so a malformed frame and a duplicate each produce a trace too, which is the point, since "why did nothing arrive" is answered by the frames that were refused. It covers the server's share of the lifecycle above — stages 3 through 7, from the WebSocket message to the fan-out publish. It does not span the device, the gateway or the dashboard: nothing upstream propagates trace context, so `ingest.frame` is a root rather than a claimed child of a phone.
+
+| Span               | Parent           | Pipeline stage                            |
+| ------------------ | ---------------- | ----------------------------------------- |
+| `ingest.frame`     | none (root)      | 3 — WebSocket ingestion                   |
+| `ingest.validate`  | `ingest.frame`   | 3 — `vitalsFrameSchema` parse             |
+| `store.ingest`     | `ingest.frame`   | 4 — ring buffer, dedupe and session epoch |
+| `alert.evaluate`   | `ingest.frame`   | 5 — sliding-window engine over one frame  |
+| `alert.transition` | `alert.evaluate` | 5 — one per raise or resolve              |
+| `stream.fanout`    | `ingest.frame`   | 7 — dashboard publish                     |
+
+Parentage is passed explicitly at each call rather than read from an ambient context, and apps/server/src/tracing.shape.test.ts asserts it by span id over a golden replay. Stage 6 (S3 archive) and stage 8 (notification) carry no span because neither exists in the server; the notification-dispatch span the budget table below names is future work, and the trace stops at the fan-out publish until it lands.
+
+Attributes: deviceId, seq, session epoch, the duplicate and out-of-order flags, the ingest outcome, the validate and store results, the transition count, and per alert its id, lifecycle state, metric and direction. No reading value enters a span. The rule is "never a measured value" rather than "identifiers only", because an alert span names the rule that fired and therefore does say a device had a low-SpO2 episode — that is the alert itself, and the trade is recorded in docs/DECISIONS.md #20.
+
 ## Latency budgets — all TARGETS
 
 | Path                                  | Target    | How C19 measures it                                                                                                                                          |
@@ -97,4 +116,4 @@ The gateway half shipped at C15: frames buffer on-device while the uplink is dow
 
 ## Measurement plan
 
-OpenTelemetry wiring lands at C18 (Docker, compose, dashboards-as-code in infra/) and the k6 load profile at C19; from C19 on, measured numbers replace every TARGET label in this document and the README, per the [ROADMAP.md](ROADMAP.md) rule. Until then, any latency claim quoted from this file must carry the word "target".
+OpenTelemetry tracing shipped at C18 (see "Where the spans sit" above); the container image, compose stack, dashboards-as-code in infra/ and the k6 load profile all land at C19; from C19 on, measured numbers replace every TARGET label in this document and the README, per the [ROADMAP.md](ROADMAP.md) rule. Until then, any latency claim quoted from this file must carry the word "target".

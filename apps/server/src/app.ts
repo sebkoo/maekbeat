@@ -1,4 +1,5 @@
 import fastifyCors from "@fastify/cors";
+import type { Tracer } from "@opentelemetry/api";
 import fastifySwagger from "@fastify/swagger";
 import fastifySwaggerUi from "@fastify/swagger-ui";
 import fastifyWebsocket from "@fastify/websocket";
@@ -25,6 +26,15 @@ declare module "fastify" {
 export interface BuildAppOptions {
   /** Override the alert rule set; defaults to DEFAULT_ALERT_RULES. */
   alertRules?: readonly AlertRuleConfig[];
+  /**
+   * Tracer for the ingest path (C18). Passed in rather than read from the
+   * OpenTelemetry global so two servers in one process can differ — which is
+   * what lets src/tracing.shape.test.ts run the same fixture traced and
+   * untraced and compare the alerts. Omitted, every span is non-recording.
+   */
+  tracer?: Tracer;
+  /** Receive clock for the ingest path; omitted, `Date.now`. */
+  now?: () => number;
 }
 
 export async function buildApp(config: ServerConfig, options: BuildAppOptions = {}) {
@@ -100,7 +110,14 @@ export async function buildApp(config: ServerConfig, options: BuildAppOptions = 
   app.decorate("decisionLog", decisions);
 
   await app.register(fastifyWebsocket, { options: { maxPayload: INGEST_MAX_PAYLOAD_BYTES } });
-  await app.register(ingestPlugin, { store, engine, counters, broadcaster });
+  await app.register(ingestPlugin, {
+    store,
+    engine,
+    counters,
+    broadcaster,
+    tracer: options.tracer,
+    now: options.now,
+  });
   await app.register(readsPlugin, { store, engine, counters, decisions, broadcaster });
   await app.register(streamPlugin, { broadcaster, ringCapacity: config.RING_CAPACITY });
 

@@ -15,7 +15,7 @@ Maekbeat uses synthetic data only. There is no protected health
 information anywhere in this repository, so a vulnerability here cannot
 expose patient data. Reports about the ingest path (WebSocket), the REST
 API, the alert engine, or the AWS infrastructure — C5–C19 in
-`docs/ROADMAP.md`, shipped through C17 — are in scope as each lands.
+`docs/ROADMAP.md`, shipped through C18 — are in scope as each lands.
 
 ## Dependencies
 
