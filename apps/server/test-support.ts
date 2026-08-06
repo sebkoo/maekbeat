@@ -252,10 +252,9 @@ export function stopAndAwaitExit(
 /*
  * Part three — an in-process server and the sockets attached to it.
  *
- * Used by src/load.test.ts, and kept here rather than in it because a suite
- * that drives a real server inside this process is not going to be the only
- * one: a second copy of this harness would show up later as two files
- * disagreeing about the same server.
+ * Shared by src/load.test.ts and src/fanout-bound.test.ts — the load suite and
+ * the bound it measured — which need the same four things. A second copy would
+ * show up as the two files disagreeing about the same server.
  */
 
 /**

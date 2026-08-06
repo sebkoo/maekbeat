@@ -904,3 +904,49 @@ awaiting the socket's open event, and `ready` is sent the instant the upgrade
 completes. Three red runs before it was a lost greeting rather than what it
 would have been a commit later — a lost frame, on a suite whose entire job is
 counting frames.
+
+## C19 — the fan-out bound, and what happens at it
+
+The gap this closes had been on the record since C11 and deferred twice, in
+apps/server/README.md and docs/ARCHITECTURE.md, on the argument that choosing a
+threshold before measuring one would be inventing it. Running the server under
+load is what produced the measurement: a subscriber that completes the
+handshake and then never reads held 12.1 MB of undelivered fan-out against
+12.7 MB published over 60 000 frames, with nothing dropped, nothing closed and
+nothing counted.
+
+Bounding the queue forces a second decision the memory number does not settle —
+what happens to the messages at the bound — and one of the two options
+contradicts a rule this repository already holds. The guards are in
+`src/fanout-bound.test.ts`.
+
+| Guard                                         | Mutation                                          | Result |
+| --------------------------------------------- | ------------------------------------------------- | ------ |
+| a stalled subscriber is dropped               | `false &&` the `bufferedAmount` check             | caught |
+| the overflow is visible, not a silent thin    | drop the message, keep the subscriber             | caught |
+| a healthy subscriber is never dropped         | `if (true)` — drop every subscriber on every send | caught |
+| an alert survives the outage the bound causes | skip `engine.process` when nothing is subscribed  | caught |
+
+The last row is the one worth keeping. It is not a mutation of this commit's
+diff at all — it is a plausible-looking optimisation somewhere else, "do not
+compute alerts nobody is listening for" — and it is exactly the C17 defect
+rebuilt one layer down, where apps/ios `backfill()` re-read frames and not
+alerts and an episode opening during an outage healed the chart across a gap
+the alarm was missing from. A bound that drops subscribers manufactures that
+outage deliberately, so the composition had to be pinned rather than reasoned
+about.
+
+It also caught the test before it caught the mutation. The first version of the
+alert-survival test left a healthy subscriber watching alongside the stalled
+one, so something was always subscribed and the mutation walked straight past
+it while every other guard stayed green. **A test of an outage has to contain
+the outage**: the stalled subscriber is now the only one, which is the caregiver
+case anyway — one dashboard, on a connection that cannot keep up, dropped, and
+then the episode starts with nobody attached.
+
+The visible-overflow guard is the reason the rejected alternative is recorded in
+docs/DECISIONS.md #23 rather than dismissed in a comment. Discarding messages
+and keeping the socket open passes a memory assertion exactly as well as
+dropping does; the test that separates them reads the bytes the server actually
+sent — a contiguous prefix of seqs and then a close frame carrying 1013 — and a
+skipped frame in the middle of that prefix is the whole failure.
