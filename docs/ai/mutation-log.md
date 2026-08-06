@@ -229,3 +229,58 @@ so several transport tests that left the client to a local `let` were asserting
 against an object ARC had already released: every assertion about what it did
 held, because it did nothing. The suite now keeps the client on the test case
 for its lifetime, and the reason is written where the next reader will hit it.
+
+## Fan-out delivery: waiting for a condition, not for the clock
+
+`apps/server/src/stream.test.ts` asserted that a dashboard had received 110
+fan-out messages after a fixed 40 ms pause. Fan-out is asynchronous, so what has
+arrived by any given millisecond is a property of the machine. On a loaded CI
+runner 76 had arrived and `main` went red; on every developer machine it passed.
+
+That is the part worth recording plainly: **this test gave a false green locally
+for every commit since C11.** The suite's guarantee was environment-dependent,
+and the environment where it was usually run was the fast one. Nothing in the
+gate said so, because a test that passes tells you nothing about why.
+
+| Guard                                    | Own mutation                                         | Neighbour mutation                           | Result              |
+| ---------------------------------------- | ---------------------------------------------------- | -------------------------------------------- | ------------------- |
+| every accepted frame is pushed           | drop `seq` 42 in `publishFrame`                      | —                                            | caught              |
+| the dedupe test is real                  | push duplicates instead of dropping them             | —                                            | caught              |
+| the repaired test is not slower to trust | delay every send by `n × 2` ms, run the **old** test | the same delay against the **repaired** test | caught, then passes |
+
+The third row is the one that matters and is worth reading as a pair. Under
+artificial slowness the old test failed with `expected […] to have a length of
+110 but got 17` — the CI failure reproduced on demand — and the repaired test
+passed all ten cases against the same slowed server. The fix cannot be hiding a
+real drop: with `seq` 42 dropped, the repaired test still fails, and it now says
+`timed out after 3000 ms waiting for 110 frame messages; received 109`, which
+names the defect instead of shrugging at a clock.
+
+The wait budget is 3 s rather than vitest's default 5 s `testTimeout` on
+purpose: whichever fires first writes the message, and the one that counts the
+frames is more useful than the one that counts the seconds.
+
+### The sweep, and what was left alone
+
+The class is "a count or a final state of asynchronously delivered messages,
+asserted after a fixed wait". Every instance in the repository:
+
+| Site                                               | Verdict                                                                                 |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `stream.test.ts` — 110 delivered frames            | fixed: wait for the count                                                               |
+| `stream.test.ts` — the ready greeting              | fixed: wait for the first message                                                       |
+| `stream.test.ts` — dedupe pushes one frame         | fixed, and made deterministic — see below                                               |
+| `stream.test.ts` — subscriber attach and detach    | fixed: wait for `subscriberCount`                                                       |
+| `acks.test.ts` — 110 frames must raise an alert    | fixed: wait for the engine to hold one                                                  |
+| `acks.test.ts` — a decision fans out exactly once  | fixed: wait for the first, then a stated grace for the absence of a second              |
+| `apps/web/e2e/journey.spec.ts` — two `setTimeout`s | left: pacing between sends and a flush before close, not assertion waits — every        |
+|                                                    | assertion in that file is a Playwright web-first `expect`, which retries on a condition |
+| `apps/server/scripts/demo.ts` — `sleep`            | left: demo pacing, not a test                                                           |
+
+The dedupe case did better than a wait. Rather than pausing to see whether a
+duplicate shows up, the test now sends the duplicate followed by a distinct
+frame and waits for _that_ to arrive: delivery order on one socket is preserved,
+so a pushed duplicate would already be sitting between them. An absence became a
+condition, and the only remaining grace period in the suite is the one in
+`acks.test.ts`, where a second fan-out of a single decision genuinely is an
+absence and no amount of polling can prove one.

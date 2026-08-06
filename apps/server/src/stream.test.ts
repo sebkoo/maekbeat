@@ -3,6 +3,7 @@ import { takeFrames } from "@maekbeat/vitals-sim";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 
+import { waitFor } from "../test-support";
 import { buildApp } from "./app";
 import { loadConfig } from "./config";
 import { DeviceBroadcaster } from "./stream";
@@ -122,13 +123,18 @@ describe("GET /devices/:deviceId/stream", () => {
       socket.once("error", reject);
     });
 
-  const settle = () => new Promise((resolve) => setTimeout(resolve, 40));
+  /** Frame messages a dashboard has actually received. */
+  const framesOf = (dash: { messages: StreamMessage[] }) =>
+    dash.messages.filter((message) => message.type === "frame");
 
   it("greets a subscriber with the ring capacity it could back-fill from", async () => {
     const { base } = await startServer();
     const dash = connect(base, "/devices/dev-1/stream");
     await opened(dash.socket);
-    await settle();
+    await waitFor(
+      () => dash.messages.length >= 1,
+      () => `the ready greeting; received ${dash.messages.length} messages`,
+    );
 
     expect(dash.messages[0]).toEqual({
       type: "ready",
@@ -155,7 +161,15 @@ describe("GET /devices/:deviceId/stream", () => {
     for (const frame of frames) {
       ingest.send(JSON.stringify(frame));
     }
-    await settle();
+    // Wait for the delivery, not for the clock. A fixed pause here asserted a
+    // property of the machine: on a loaded runner only 76 of the 110 had
+    // arrived and this test went red for a server that was behaving. The
+    // assertion below is unchanged — a server that really drops a frame still
+    // times out here and still fails on the real count.
+    await waitFor(
+      () => framesOf(dash).length >= 110,
+      () => `110 frame messages; received ${framesOf(dash).length}`,
+    );
 
     const kinds = dash.messages.map((message) => message.type);
     expect(kinds[0]).toBe("ready");
@@ -193,23 +207,37 @@ describe("GET /devices/:deviceId/stream", () => {
       respirationRpm: frame.respirationRpm,
       motion: frame.motion,
     };
+    // The duplicate, then a distinct follower. Delivery order on one socket is
+    // preserved, so once the follower has arrived a pushed duplicate would
+    // already be sitting between them — which makes this a condition to wait on
+    // rather than an absence to pause for.
+    const follower = { ...wire, seq: wire.seq + 1, capturedAtMs: wire.capturedAtMs + 1_000 };
     ingest.send(JSON.stringify(wire));
     ingest.send(JSON.stringify(wire));
-    await settle();
+    ingest.send(JSON.stringify(follower));
+    await waitFor(
+      () => framesOf(dash).some((message) => message.frame.seq === follower.seq),
+      () => `the follower frame; received seqs ${framesOf(dash).map((m) => m.frame.seq)}`,
+    );
 
-    expect(dash.messages.filter((message) => message.type === "frame")).toHaveLength(1);
+    expect(framesOf(dash)).toHaveLength(2);
+    expect(framesOf(dash).filter((message) => message.frame.seq === wire.seq)).toHaveLength(1);
   });
 
   it("detaches the subscriber when the dashboard socket closes", async () => {
     const { app, base } = await startServer();
     const dash = connect(base, "/devices/dev-1/stream");
     await opened(dash.socket);
-    await settle();
-    expect(app.deviceBroadcaster.subscriberCount("dev-1")).toBe(1);
+    await waitFor(
+      () => app.deviceBroadcaster.subscriberCount("dev-1") === 1,
+      () => `one subscriber; saw ${app.deviceBroadcaster.subscriberCount("dev-1")}`,
+    );
 
     dash.socket.close();
-    await settle();
-    expect(app.deviceBroadcaster.subscriberCount()).toBe(0);
+    await waitFor(
+      () => app.deviceBroadcaster.subscriberCount() === 0,
+      () => `the subscriber to detach; ${app.deviceBroadcaster.subscriberCount()} remain`,
+    );
   });
 
   it("answers a plain HTTP request with 426 instead of hanging", async () => {

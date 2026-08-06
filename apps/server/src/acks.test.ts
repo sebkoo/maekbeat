@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 
 import { DecisionLog } from "./acks";
+import { graceForAbsence, waitFor } from "../test-support";
 import { buildApp } from "./app";
 import { loadConfig } from "./config";
 
@@ -192,7 +193,12 @@ describe("POST /devices/:deviceId/alerts/:alertId/decisions", () => {
     for (const frame of takeFrames({ scenario: "anomaly", seed: 7, deviceId: "sim-ack" }, 110)) {
       ingest.send(JSON.stringify(frame));
     }
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    // Ingest is a socket, so the frames arrive when they arrive. A fixed pause
+    // here made every test in this file depend on how loaded the machine was.
+    await waitFor(
+      () => app.alertEngine.listAlerts("sim-ack").length > 0,
+      () => `the anomaly to raise an alert; ${app.alertEngine.listAlerts("sim-ack").length} raised`,
+    );
 
     const alerts = app.alertEngine.listAlerts("sim-ack");
     expect(alerts.length).toBeGreaterThan(0);
@@ -262,9 +268,17 @@ describe("POST /devices/:deviceId/alerts/:alertId/decisions", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ decision: "dismissed", actor: "web-dashboard" }),
     });
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    const decisionsSoFar = () => received.filter((message) => message.type === "decision");
+    await waitFor(
+      () => decisionsSoFar().length >= 1,
+      () => `the decision to fan out; received ${received.length} messages`,
+    );
+    // One decision was posted, so a second would be a bug. That is an absence,
+    // and no amount of polling proves an absence — the grace covers the gap
+    // between the message that should arrive and one that should not.
+    await graceForAbsence();
 
-    const decisions = received.filter((message) => message.type === "decision");
+    const decisions = decisionsSoFar();
     expect(decisions).toHaveLength(1);
     expect((decisions[0]?.decision as { decision: string }).decision).toBe("dismissed");
   });

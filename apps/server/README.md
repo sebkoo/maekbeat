@@ -56,7 +56,19 @@ The push leg of [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) stage 7, in i
 
 On subscribe the socket sends `{type:"ready", deviceId, serverTimeMs, ringCapacity}`, then one `{type:"frame", frame}` per accepted frame and one `{type:"alert", alert}` per lifecycle transition, both shaped by `streamMessageSchema` in [@maekbeat/protocol](../../packages/protocol). Publishing happens after the engine has judged the frame, so a dashboard never sees an alert before the frame that raised it, and deduped frames never reach it at all.
 
-Subscribing to a device the server has never seen is allowed and stays silent until its first frame — a monitor that had to wait for data before attaching would miss the data it was waiting for. A subscriber whose socket dies mid-send is dropped without disturbing ingest for that device, and the close handler unsubscribes it. `ringCapacity` is sent so a client knows the largest window a reconnect could recover; anything evicted past it is gone, and [apps/web](../web) renders that as a gap rather than a join. Since C14 the route has a second kind of subscriber: the [apps/ios](../ios) app reads it with the same rules and the same backoff numbers.
+Subscribing to a device the server has never seen is allowed and stays silent until its first frame — a monitor that had to wait for data before attaching would miss the data it was waiting for. A subscriber whose socket dies mid-send is dropped without disturbing ingest for that device, and the close handler unsubscribes it.
+
+### A slow subscriber has no bound, and that is a gap
+
+Every other bound in this server is a decision with a number on it: the frame ring at `RING_CAPACITY`, the alert history at `ALERT_HISTORY_LIMIT`, the dedupe set at `SEQ_REORDER_WINDOW`, the inbound message at `INGEST_MAX_PAYLOAD_BYTES`. The fan-out has none. `publish` calls `socket.send()` per subscriber ([src/stream.ts](src/stream.ts)) and nothing inspects `bufferedAmount`, so a dashboard that cannot keep up has its frames queued in the `ws` send buffer without limit — no drop, no backpressure, no cap.
+
+What that costs: a caregiver dashboard on a poor connection makes this process hold memory proportional to how far behind it is, for as long as the socket stays open, and a device streaming at 1 Hz keeps adding to it. Nothing warns, because nothing is counted. That is memory growth driven by a client, which is the shape of problem the other four bounds exist to prevent.
+
+What it does not cost, today: nothing is dropped, so no dashboard silently loses a frame to this. If a bound is ever added and it drops, the dashboard is already honest about the result — apps/web breaks the chart line across missing samples and shades the gap rather than interpolating (C11), and a reconnect back-fills whatever the ring still holds.
+
+The bound belongs to C19, not here. Choosing a number before the k6 profile measures what a subscriber actually falls behind by would be inventing a threshold, and C19 is the commit that both measures the load and replaces this in-process publisher with the Lambda fan-out that has its own delivery semantics. Until then it is a stated limit rather than a fixed one.
+
+This was found by the test that broke: [src/stream.test.ts](src/stream.test.ts) asserted 110 delivered frames after a fixed 40 ms pause and saw 76 on a loaded CI runner. That failure was the assertion being made too early rather than the server falling behind — the fix was to wait for the delivery rather than for the clock ([test-support.ts](test-support.ts)) — but it is the question it raised that this section answers. `ringCapacity` is sent so a client knows the largest window a reconnect could recover; anything evicted past it is gone, and [apps/web](../web) renders that as a gap rather than a join. Since C14 the route has a second kind of subscriber: the [apps/ios](../ios) app reads it with the same rules and the same backoff numbers.
 
 ## Acknowledgement — `POST /devices/:deviceId/alerts/:alertId/decisions` (since C12)
 
