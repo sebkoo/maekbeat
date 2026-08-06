@@ -61,11 +61,15 @@ function_body_length:
   error: 60
 
 identifier_name:
-  # `v` is the protocol version field on the wire. Renaming it to satisfy a
-  # linter would break the contract the goldens pin.
+  # `v` is the protocol version field on the wire; renaming it would break the
+  # contract the goldens pin. `to` and `in` are Swift argument labels — the rule
+  # exists to stop cryptic identifiers, and `moved(from:to:)` is the opposite of
+  # cryptic. Renaming them to reach three characters would make the API worse.
   excluded:
     - v
     - id
+    - to
+    - in
 
 # Test method names in this repository are sentences on purpose: the failure
 # output is meant to read as a statement about the system.

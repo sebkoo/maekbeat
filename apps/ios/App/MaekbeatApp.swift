@@ -15,7 +15,10 @@ import SwiftUI
 struct MaekbeatApp: App {
     var body: some Scene {
         WindowGroup {
-            RootView(client: APIClient(baseURL: Self.baseURL))
+            RootView(
+                client: APIClient(baseURL: Self.baseURL),
+                gateway: GatewayModel.live(baseURL: Self.baseURL)
+            )
         }
     }
 

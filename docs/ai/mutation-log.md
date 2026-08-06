@@ -341,3 +341,151 @@ The general shape, since three of the four are the same shape: a guard written
 against _what this project does_ meets _what the platform does on its behalf_.
 Merge subjects, secrets, and trailers are all written by GitHub, not by an
 author, and none of them were in view when the rule was drafted.
+
+## C15 — CoreBluetooth central, BLE state machine, gateway uplink
+
+Own mutation and, where a neighbour existed, its neighbour. Logic ran against
+`swift test`; the rows marked REAL SERVER ran against a live apps/server through
+apps/ios/scripts/integration.sh.
+
+### The state machine
+
+| Guard                              | Own mutation                               | Neighbour mutation                   | Result |
+| ---------------------------------- | ------------------------------------------ | ------------------------------------ | ------ |
+| recovering is not connecting       | make `retryState` always `.connecting`     | make it always `.recovering`         | caught |
+| illegal transitions are rejected   | turn the `default` reject into an ignore   | —                                    | caught |
+| stop clears the intent             | keep `wantsLink` through `halt()`          | clear it when the radio goes instead | caught |
+| a success resets the failure count | drop `attempt = 0` on notificationsEnabled | —                                    | caught |
+| a frame re-arms the stall deadline | stop re-arming on `frameReceived`          | —                                    | caught |
+
+### The profile
+
+| Guard                          | Own mutation                           | Neighbour mutation                 | Result |
+| ------------------------------ | -------------------------------------- | ---------------------------------- | ------ |
+| the frame fits the default MTU | widen the payload to 21 bytes          | zero the ATT notification overhead | caught |
+| the codec is little-endian     | read `seq` most-significant-byte first | —                                  | caught |
+| bounds hold on the radio path  | drop `validated()` from `decode`       | accept any profile version         | caught |
+
+### Resume, and the C6 contract
+
+| Guard                             | Own mutation                               | Neighbour mutation                          | Result |
+| --------------------------------- | ------------------------------------------ | ------------------------------------------- | ------ |
+| a reconnect resends only the tail | keep the in-flight mark across a reconnect | clear the acknowledged mark too — see below | caught |
+| a reboot is not replayed across   | keep the pre-reboot buffer                 | —                                           | caught |
+| the reboot window is the server's | set `reorderWindow` to 0                   | set it to 4096                              | caught |
+| the buffer is bounded             | remove the cap                             | —                                           | caught |
+| the model actually resumes        | drop the pump from `onReconnect`           | stop marking frames sent                    | caught |
+| REAL SERVER: no replay on resume  | clear the acknowledged mark on reconnect   | —                                           | caught |
+| REAL SERVER: the window matches   | set `reorderWindow` to 4096                | —                                           | caught |
+
+### The honesty guards, evolved rather than deleted
+
+C14 banned the radio's whole vocabulary from apps/ios because there was no
+radio. C15 has one, so the ban became a boundary — the framework may be named in
+`CoreBluetoothCentral.swift` and nowhere else — and the tests moved from
+scanning file text to scanning code, so a file can explain the rule it obeys
+without tripping it.
+
+| Guard                            | Own mutation                                | Neighbour mutation                             | Result |
+| -------------------------------- | ------------------------------------------- | ---------------------------------------------- | ------ |
+| the radio lives in one file      | name `CBCentralManager` in the driver       | rename the adapter so the check has no subject | caught |
+| the adapter holds no logic       | give it an `attempt` counter                | —                                              | caught |
+| no user-visible wearable claim   | add "your device is connected" to `Copy`    | —                                              | caught |
+| the background mode is declared  | remove `UIBackgroundModes` from the pbxproj | remove the usage description                   | caught |
+| the network stays in three files | open a `URLSession` from a view             | —                                              | caught |
+
+### The remodel: three bugs that were one design problem
+
+An adversarial pass found three cells of the transition table whose answer
+depended on which setup path reached the state. That is one problem wearing
+three faces: the table was indexed by phase, the machine also consulted
+`hasStreamed`, and so a cell could have two answers and the test asserted
+whichever the setup happened to produce.
+
+Folding `hasStreamed` into `LinkState` and re-running produced a failing cell
+nobody had predicted — `disconnected + radioReady` — because `wantsLink` had
+escaped the type the same way. Both are in the state now, nine states, and three
+combinations are unrepresentable rather than merely unused.
+
+What the remodel surfaced, and what it did not, because the difference is the
+point:
+
+| Symptom                                                           | Surfaced by the remodel?                                                                                |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| a restarted session reporting "readings are being missed"         | **yes** — the cell forced a decision about what `stop` produces                                         |
+| `radioReady` resuming a link nobody asked for                     | **yes** — a cell that failed on the first run after folding in the flag                                 |
+| a retry timer outliving the state that scheduled it               | **no** — a lifetime error, not a state one; the table had to start asserting effects before it appeared |
+| the cold-start backoff reading 2 s where three documents said 1 s | **no** — an off-by-one in a counter, found by pinning the sequence                                      |
+
+| Guard                                    | Own mutation                               | Neighbour mutation                   | Result                                     |
+| ---------------------------------------- | ------------------------------------------ | ------------------------------------ | ------------------------------------------ |
+| stop ends the session                    | keep `hasStreamed` through `halt()`        | clear it when the radio goes instead | caught                                     |
+| every exit cancels a pending retry       | drop `cancelRetry` from `halt()`           | drop it from `radioLost()`           | caught                                     |
+| a fresh start cancels an inherited retry | drop `cancelRetry` from `beginAttempt`     | —                                    | caught                                     |
+| the driver acts on `cancelRetry`         | make the effect a no-op in `BLEDriver.run` | —                                    | caught, after a test was added — see below |
+| the cold-start backoff is 1 s            | start the counter at 1 again               | —                                    | caught                                     |
+| `wantsLink` gates a returning radio      | resume whether or not it is wanted         | —                                    | caught                                     |
+| `streaming` implies `hasStreamed`        | make the accessor return false             | —                                    | caught                                     |
+
+Two rows there earned their place by failing first. The driver's handling of
+`cancelRetry` was uncaught: the matrix proves the machine _emits_ the effect,
+and nothing proved the driver _acts_ on it — the half of the fix that stops the
+timer. A driver test now asserts that after leaving a pending retry, firing the
+scheduler produces no reconnect and no rejected event, which is exactly the
+symptom the original bug had.
+
+The other was a deletion. Clearing the driver's retry handle from inside the
+fired closure could not be caught by any mutation, and the three questions gave
+the same answer they gave for `resumeSeq`: cancelling a spent timer is already a
+no-op, there is no threat to name, so the line went. The rule added to
+AI_USAGE.md in this same commit had teeth within an hour of being written.
+
+One more thing the remodel exposed, and it is about the harness rather than the
+code: `swift test` on macOS does not compile the UIKit-guarded render tests, so
+a green fast loop is not a green gate. The state-type change broke
+`ViewRenderingTests` and only `scripts/test.sh` on the simulator said so.
+
+### `lastAckedSeq`: the mutation that could not be caught
+
+One C15 mutation resisted every attempt — clearing `lastAckedSeq` on an uplink
+reconnect changed nothing observable, because `acknowledge` already removes the
+acknowledged frames from `pending`. Rather than write a test to chase it, the
+field was put through the three questions now recorded in
+[AI_USAGE.md](AI_USAGE.md): does it change anything observable, what specific
+threat does it defend against, and if neither can be answered, should it exist?
+
+Probing each of its five uses separately gave three different answers, so the
+resolution is three different actions:
+
+| Use                                              | Mutation result | Branch taken                                          |
+| ------------------------------------------------ | --------------- | ----------------------------------------------------- |
+| `offer()` refuses a frame at or below the mark   | caught          | **(a)** — observable, already tested                  |
+| the `lastAckedSeq` term in `nextBatch()`'s floor | NOT caught      | **(c)** — deleted; `pending` cannot hold such a frame |
+| `resumeSeq`, read by no production code          | NOT caught      | **(c)** — deleted; public API nothing called          |
+| cleared on a peripheral reboot                   | caught          | **(a)** — observable, already tested                  |
+| surviving an uplink reconnect                    | NOT caught      | **(b)** — threat named, test written, now caught      |
+
+The named threat for the last row: **the uplink reconnects, and the peripheral
+then re-offers a frame the server has already filed.** Peripheral retransmits
+are not hypothetical in this design — they are the reason the queue borrows the
+server's reorder window instead of treating every regression as a reboot — and
+both links can drop together, since a phone going out of range takes the radio
+and the wifi with it. Without the surviving mark that re-offer is queued, sent,
+and answered `duplicate`, which is the one outcome the resume rule exists to
+prevent. The test stages exactly that, at unit level and again against the real
+server, and the once-uncatchable mutation is caught by both.
+
+Two of the C15 rows above reported NOT CAUGHT on the first attempt and were
+neither a missing test nor dead state — they were the harness. The mutation
+script replaced only the first occurrence of its anchor, and
+`project.pbxproj` declares `INFOPLIST_KEY_UIBackgroundModes` twice, once per
+build configuration; the Debug copy went away and the Release copy kept the
+assertion green. Both are caught once the mutation removes both. Worth recording
+because a mutation harness is a test of the tests, and it can be wrong in the
+direction that flatters everyone: a false NOT CAUGHT invites deleting a guard
+that works.
+
+Two things were deleted rather than tested, and that is the part worth keeping:
+a second filter for a state that cannot occur, and a computed property only its
+own tests read. Writing tests for either would have pinned internals nothing
+observes, and left two pieces of parallel truth to drift.

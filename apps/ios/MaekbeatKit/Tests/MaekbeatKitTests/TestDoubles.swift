@@ -121,6 +121,67 @@ final class StreamRecorder {
     }
 }
 
+/// A fake uplink socket: records what was sent, and lets a test open, drop and
+/// reopen it without a server.
+@MainActor
+final class FakeIngestSocket: IngestSocket {
+    let handlers: IngestHandlers
+    private(set) var sent: [String] = []
+    private(set) var closeCount = 0
+
+    init(handlers: IngestHandlers) {
+        self.handlers = handlers
+    }
+
+    func send(_ text: String) { sent.append(text) }
+    func close() { closeCount += 1 }
+
+    func open() { handlers.onOpen() }
+    func drop() { handlers.onClose() }
+    func reply(_ text: String) { handlers.onText(text) }
+
+    /// The seqs of the frames written to this socket, in order.
+    var sentSeqs: [Int] {
+        sent.compactMap { text in
+            guard let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)),
+                  let dictionary = object as? [String: Any] else { return nil }
+            return dictionary["seq"] as? Int
+        }
+    }
+}
+
+/// Hands out fake uplink sockets and remembers each one.
+@MainActor
+final class FakeIngestTransport {
+    private(set) var sockets: [FakeIngestSocket] = []
+    var latest: FakeIngestSocket? { sockets.last }
+
+    var factory: IngestSocketFactory {
+        { [weak self] _, handlers in
+            let socket = FakeIngestSocket(handlers: handlers)
+            self?.sockets.append(socket)
+            return socket
+        }
+    }
+
+    /// Everything every socket ever sent, in order — the check that matters for
+    /// resume is what crossed the wire in total, not per connection.
+    var allSentSeqs: [Int] { sockets.flatMap(\.sentSeqs) }
+}
+
+enum IngestWire {
+    static func ack(seq: Int, sessionEpoch: Int = 1, newSession: Bool = false) -> String {
+        """
+        {"type":"ack","deviceId":"sim-001","seq":\(seq),"sessionEpoch":\(sessionEpoch),\
+        "receivedAtMs":1754265600120,"newSession":\(newSession)}
+        """
+    }
+
+    static func rejected(_ reason: String) -> String {
+        #"{"type":"rejected","reason":"\#(reason)"}"#
+    }
+}
+
 // MARK: - Wire fixtures
 
 enum Wire {

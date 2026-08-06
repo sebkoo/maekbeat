@@ -67,24 +67,89 @@ final class SourceDisciplineTests: XCTestCase {
         return files
     }
 
-    // MARK: - No hardware this app does not have
+    // MARK: - The radio lives in exactly one file
 
-    /// C14 ships a simulator transport and nothing else. CoreBluetooth is C15's
-    /// commit, and until it lands, a symbol suggesting a radio is a claim about
-    /// a capability that does not exist.
-    func testNothingInThisPackageNamesARadioItDoesNotHave() throws {
-        let banned = [
-            "CoreBluetooth", "CBCentralManager", "CBPeripheral", "CBUUID",
-            "Bluetooth", "GATT", "advertis", "pairing", "RSSI"
-        ]
-        for file in try sources() {
-            for term in banned {
+    /// C14 banned the radio's whole vocabulary from this package, because there
+    /// was no radio. C15 has one, so the ban becomes a boundary: the framework
+    /// may be named in `CoreBluetoothCentral.swift` and nowhere else. That file
+    /// is the untestable surface, and a symbol leaking out of it is that
+    /// surface growing where nothing measures it.
+    ///
+    /// Prose is no longer banned — the BLE files have to be able to say what
+    /// they model — so this checks the symbols a compiler would resolve.
+    func testTheRadioFrameworkIsNamedInExactlyOneFile() throws {
+        let adapter = "CoreBluetoothCentral.swift"
+        let symbols = ["import CoreBluetooth", "CBCentralManager", "CBPeripheral",
+                       "CBUUID", "CBManagerState", "CBService", "CBCharacteristic"]
+        let files = try sources()
+
+        for file in files where file.name != adapter {
+            let code = Self.codeLines(of: file.text).joined(separator: "\n")
+            for symbol in symbols {
                 XCTAssertFalse(
-                    file.text.localizedCaseInsensitiveContains(term),
-                    "\(file.name) names \(term); this commit has no radio — that is C15"
+                    code.contains(symbol),
+                    "\(file.name) names \(symbol); the radio belongs to \(adapter) alone"
                 )
             }
         }
+
+        // The guard must not pass because the adapter was renamed out from
+        // under it, leaving nothing to check.
+        let file = try XCTUnwrap(files.first { $0.name == adapter }, "the adapter is gone")
+        XCTAssertTrue(file.text.contains("import CoreBluetooth"))
+    }
+
+    /// The adapter earns its exemption by holding no decisions. Anything that
+    /// branches on link state, counts attempts, or schedules a retry belongs in
+    /// the machine, where the gate can reach it.
+    func testTheAdapterHoldsNoLogicOfItsOwn() throws {
+        let file = try XCTUnwrap(
+            try sources().first { $0.name == "CoreBluetoothCentral.swift" }
+        )
+        // Code, not prose: the file has to be able to explain what it is not
+        // allowed to do without tripping the check that it does not do it.
+        let code = Self.codeLines(of: file.text).joined(separator: "\n")
+        for symbol in ["LinkState.", "attempt", "Timer", "DispatchQueue.main.asyncAfter",
+                       "backoff", "LinkTiming", "UplinkQueue", "BLELinkMachine"] {
+            XCTAssertFalse(
+                code.contains(symbol),
+                "the adapter names \(symbol); decisions belong in BLELinkMachine, which is tested"
+            )
+        }
+
+        // A smell detector, not the real guard — that is the symbol ban above.
+        // The cap sits at 140 because seven delegate methods whose signatures
+        // the framework dictates spend roughly forty lines before any of them
+        // does anything, and shrinking it further would mean wrapping those
+        // signatures past the line limit rather than removing any logic.
+        let lineCount = Self.codeLines(of: file.text).count
+        XCTAssertLessThanOrEqual(
+            lineCount,
+            140,
+            "the untestable adapter has grown to \(lineCount) lines"
+        )
+    }
+
+    // MARK: - No hardware this app does not have
+
+    /// There is no peripheral. The app implements a central against a profile
+    /// documented in docs/ble-gatt-profile.md, and no device speaks it — so no
+    /// user-visible string may imply one is attached.
+    func testNoUserVisibleStringClaimsAWearableIsPresent() throws {
+        let copy = try XCTUnwrap(try sources().first { $0.name == "Copy.swift" })
+        // The string literals, not the file's own explanation of them.
+        let strings = Self.codeLines(of: copy.text).joined(separator: "\n")
+        for claim in ["wearable", "your device", "your band", "monitors ", "monitoring you"] {
+            XCTAssertFalse(
+                strings.localizedCaseInsensitiveContains(claim),
+                "Copy names \(claim); no peripheral implementing this profile exists"
+            )
+        }
+        XCTAssertTrue(
+            Copy.simulatorTransport.localizedCaseInsensitiveContains("no device radio")
+                || Copy.blePeripheralAbsent.localizedCaseInsensitiveContains("no peripheral"),
+            "the interface must say what it is not talking to"
+        )
     }
 
     /// The same rule for the other easy lie. There is no App Store listing, no
@@ -167,8 +232,11 @@ final class SourceDisciplineTests: XCTestCase {
 
     /// A view that can open its own connection is a view whose failure states
     /// nobody designed. apps/web enforces this with a source scan; so does this.
-    func testOnlyTheTwoTransportModulesTouchTheNetwork() throws {
-        let allowed: Set<String> = ["APIClient.swift", "StreamClient.swift"]
+    /// Three files since C15: the uplink socket is the leg the gateway needs.
+    func testOnlyTheThreeTransportModulesTouchTheNetwork() throws {
+        let allowed: Set<String> = [
+            "APIClient.swift", "StreamClient.swift", "IngestClient.swift"
+        ]
         let networkSymbols = ["URLSession", "URLRequest", "webSocketTask", "dataTask"]
         for file in try sources() where !allowed.contains(file.name) {
             for symbol in networkSymbols {
@@ -222,6 +290,37 @@ final class SourceDisciplineTests: XCTestCase {
             .contentsOfDirectory(atPath: url.appendingPathComponent("Sources").path)
             .filter { !$0.hasPrefix(".") }
         XCTAssertEqual(Set(sourceDirs), ["MaekbeatKit"], "an unmeasured source directory exists")
+    }
+
+    // MARK: - Background execution is configured, or the app crashes at launch
+
+    /// Not a nice-to-have. CoreBluetooth raises `NSInternalInconsistencyException`
+    /// when a central is constructed with a restore identifier and the app has
+    /// not declared the bluetooth-central background mode — observed while
+    /// writing C15, in a test bundle that had not declared it. So an omission
+    /// here is not a degraded feature, it is a launch-time crash, and the
+    /// simulator gate cannot see it because the app target is not what the gate
+    /// runs. This is the check that can.
+    func testTheAppDeclaresTheBackgroundModeItsRestoreIdentifierRequires() throws {
+        var url = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { url = url.deletingLastPathComponent() }
+        let project = try String(
+            contentsOf: url.appendingPathComponent("Maekbeat.xcodeproj/project.pbxproj"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(
+            project.contains("INFOPLIST_KEY_UIBackgroundModes = \"bluetooth-central\""),
+            "the app target must declare bluetooth-central; CoreBluetooth raises without it"
+        )
+        XCTAssertTrue(
+            project.contains("INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription"),
+            "iOS refuses to show the permission prompt without a usage description"
+        )
+        XCTAssertFalse(
+            CoreBluetoothCentral.restoreIdentifier.isEmpty,
+            "restoration needs a stable identifier across launches"
+        )
     }
 
     // MARK: - The app target stays a shell

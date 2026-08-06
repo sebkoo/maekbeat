@@ -164,6 +164,11 @@ jobs:
   # (apps/ios/scripts/coverage-gate.sh) and the tests job above asserts that
   # this job still calls it.
   #
+  # Since C15 it also runs the gateway integration suite on the macOS host: the
+  # resume contract is checked by launching a real apps/server and reading its
+  # replies, which an iOS Simulator test cannot do because it cannot spawn a
+  # process. That suite is outside the coverage gate for the same reason.
+  #
   # macos-latest is billed at nothing here: standard GitHub-hosted runners are
   # free and unmetered for public repositories, macOS included, and only the
   # larger runners are charged (checked 2026-08-05 against GitHub's Actions
@@ -200,6 +205,15 @@ jobs:
       # one target out).
       - run: apps/ios/scripts/build-app.sh
       - run: apps/ios/scripts/test.sh
+      # The gateway's resume rule is checked against the server that has to
+      # honour it, not against a Swift restatement of what that server does — so
+      # this step needs a real apps/server, and therefore Node (C15).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: apps/ios/scripts/integration.sh
 
   # Proves the repository docs pass the same prettier and markdownlint gates the pre-commit hook enforces.
   docs-lint:

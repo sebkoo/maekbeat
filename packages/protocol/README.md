@@ -53,9 +53,15 @@ Notes on the contract:
   mislabeled into the new epoch — it can re-store an already-stored frame, drag
   the high-water mark back up, and fork a further spurious session. The C15
   gateway must therefore resume from its last delivered `seq` on reconnect and
-  never replay older frames — the C14 app is a reader on the fan-out socket and
-  sends nothing, so it cannot yet exercise this; removing these limits outright would take a
-  wire-level boot id, i.e. a `v` bump.
+  never replay older frames. Shipped at C15 (apps/ios `UplinkQueue`), and running
+  it against a real server corrected the first half of this note: an in-window
+  reboot is **not** absorbed by the server as duplicates, because it never
+  reaches the server. The gateway's own resume rule refuses to send anything at
+  or below the last acknowledged `seq`, so the rebooted session's early frames
+  are dropped on the phone until `seq` passes the old high-water mark — data
+  loss rather than deduplication, demonstrated by a test in apps/ios rather than
+  predicted here. Removing these limits outright would still take a wire-level
+  boot id, i.e. a `v` bump.
 - The wire frame carries one timestamp, `capturedAtMs` (device clock). It has no
   freshness bound at the contract level — freshness is an ingest-time check — and the
   server stamps its own `receivedAtMs` at ingest (apps/server/src/ingest.ts, since C6); clock-drift

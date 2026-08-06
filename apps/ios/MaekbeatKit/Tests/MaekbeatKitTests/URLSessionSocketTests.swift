@@ -34,6 +34,24 @@ final class URLSessionSocketTests: XCTestCase {
         socket.close()
     }
 
+    /// The uplink's real socket, same method: a refused port covers its
+    /// construction, its receive-failure branch and its close. The send path
+    /// and the handshake are the integration suite's, not this one's.
+    func testTheRealUplinkSocketReportsARefusedConnectionAsAClose() {
+        let closed = expectation(description: "the uplink socket reported a close")
+        let socket = URLSessionIngestSocket.make(url: unreachable, handlers: IngestHandlers(
+            onOpen: {},
+            onText: { _ in XCTFail("nothing is listening; there is no reply") },
+            onClose: { closed.fulfill() }
+        ))
+        // Legal before the handshake resolves: URLSession queues it, and the
+        // failure arrives as a close rather than as a throw.
+        socket.send("{}")
+
+        wait(for: [closed], timeout: 10)
+        socket.close()
+    }
+
     /// The client's retry loop over the real factory: a refused connection is a
     /// failure like any other, so the backoff runs rather than the badge
     /// freezing on "connecting" forever.

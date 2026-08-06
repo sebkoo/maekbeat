@@ -43,10 +43,106 @@ final class ViewRenderingTests: XCTestCase {
 
     private var client: APIClient { StubHTTP().client }
 
+    /// A gateway with a mock radio and a fake socket. `GatewayModel.live()` is
+    /// deliberately not used here: it activates a real `CBCentralManager`, and a
+    /// test bundle declares no bluetooth-central background mode, so CoreBluetooth
+    /// would raise at construction.
+    private func gateway() -> GatewayModel {
+        let radio = FakeTransport()
+        return GatewayModel(
+            driver: BLEDriver(port: MockPeripheralPort(), schedule: radio.scheduler),
+            ingest: IngestClient(
+                url: StubHTTP.baseURL,
+                createSocket: FakeIngestTransport().factory,
+                schedule: radio.scheduler
+            )
+        )
+    }
+
     // MARK: - The disclaimer and the shell
 
     func testTheRootScreenRenders() {
-        render(RootView(client: client))
+        render(RootView(client: client, gateway: gateway()))
+    }
+
+    /// Every link state the gateway can be in, laid out. `recovering` is the one
+    /// that must read differently from `connecting`, and a screen that crashes
+    /// only in the state where readings are being missed is the worst one to
+    /// find on hardware.
+    func testTheLinkScreenRendersInEveryLinkState() {
+        // Keyed by phase, because a phase is what the screen renders. The
+        // matrix covers the states behind them.
+        let paths: [LinkPhase: [LinkEvent]] = [
+            .disconnected: [],
+            .connecting: [.start],
+            .connected: [.start, .peripheralConnected],
+            .streaming: [.start, .peripheralConnected, .servicesResolved, .notificationsEnabled],
+            .recovering: [.start, .peripheralConnected, .servicesResolved,
+                          .notificationsEnabled, .linkLost]
+        ]
+        for (state, events) in paths {
+            let radio = FakeTransport()
+            let driver = BLEDriver(port: MockPeripheralPort(), schedule: radio.scheduler)
+            let model = GatewayModel(
+                driver: driver,
+                ingest: IngestClient(
+                    url: StubHTTP.baseURL,
+                    createSocket: FakeIngestTransport().factory,
+                    schedule: radio.scheduler
+                )
+            )
+            for event in events { driver.handle(event) }
+            XCTAssertEqual(model.link.phase, state)
+            render(LinkStatusView(model: model))
+        }
+    }
+
+    /// The two counters the driver keeps are rendered, not merely public. The
+    /// prose in BLEDriver and apps/ios/README.md says they are on screen, and
+    /// before this test they were on neither screen nor any code path.
+    func testTheLinkScreenRendersTheCountersItClaimsToShow() {
+        let radio = FakeTransport()
+        let sockets = FakeIngestTransport()
+        let driver = BLEDriver(port: MockPeripheralPort(), schedule: radio.scheduler)
+        let model = GatewayModel(
+            driver: driver,
+            ingest: IngestClient(url: StubHTTP.baseURL,
+                                 createSocket: sockets.factory,
+                                 schedule: radio.scheduler)
+        )
+        model.start()
+        // An event the model calls impossible, and a payload that is not a frame.
+        driver.handle(.notificationsEnabled)
+        driver.receive(payload: Data([0x00]), from: "p")
+
+        XCTAssertGreaterThan(model.rejectedLinkEvents, 0)
+        XCTAssertEqual(model.undecodablePayloads, 1)
+        render(LinkStatusView(model: model))
+    }
+
+    func testTheLinkScreenRendersAnUnusableRadioAndABacklog() {
+        let radio = FakeTransport()
+        let sockets = FakeIngestTransport()
+        let driver = BLEDriver(port: MockPeripheralPort(), schedule: radio.scheduler)
+        let model = GatewayModel(
+            driver: driver,
+            ingest: IngestClient(url: StubHTTP.baseURL,
+                                 createSocket: sockets.factory,
+                                 schedule: radio.scheduler)
+        )
+        model.start()
+        for event in [LinkEvent.peripheralConnected, .servicesResolved, .notificationsEnabled] {
+            driver.handle(event)
+        }
+        // Frames with nowhere to go, then a reboot, then the radio leaving.
+        for seq in Array(100...110) + [0] {
+            driver.receive(payload: GattProfile.encode(Self.frame(seq: seq)), from: "p")
+        }
+        driver.handle(.radioUnavailable(.poweredOff))
+
+        XCTAssertEqual(model.peripheralReboots, 1)
+        XCTAssertFalse(model.queue.isEmpty)
+        render(LinkStatusView(model: model))
     }
 
     func testTheDisclaimerBarRenders() {
@@ -169,6 +265,18 @@ final class ViewRenderingTests: XCTestCase {
     }
 
     // MARK: -
+
+    static func frame(seq: Int) -> VitalsFrame {
+        VitalsFrame(
+            deviceId: "p",
+            seq: seq,
+            capturedAtMs: 1_754_265_600_000 + seq,
+            heartRateBpm: 62,
+            spo2Pct: 97.5,
+            respirationRpm: 13.7,
+            motion: 0.01
+        )
+    }
 
     private static func alert(state: AlertState) throws -> AlertEvent {
         let resolved = state == .resolved ? 1_754_265_693_000 : nil
