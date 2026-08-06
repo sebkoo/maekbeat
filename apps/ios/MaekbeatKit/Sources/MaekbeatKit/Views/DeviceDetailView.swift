@@ -6,8 +6,12 @@ import SwiftUI
 public struct DeviceDetailView: View {
     @State private var model: DeviceDetailModel
 
-    public init(deviceId: String, client: APIClient) {
-        _model = State(initialValue: DeviceDetailModel(deviceId: deviceId, client: client))
+    public init(deviceId: String, client: APIClient, notifications: NotificationCoordinator? = nil) {
+        _model = State(initialValue: DeviceDetailModel(
+            deviceId: deviceId,
+            client: client,
+            notifications: notifications
+        ))
     }
 
     /// The seam the tests use: a model already wired to a fake socket.

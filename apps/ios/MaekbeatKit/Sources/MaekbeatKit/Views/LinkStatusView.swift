@@ -5,9 +5,11 @@ import SwiftUI
 /// docs/DECISIONS.md #12 rule the alert badges already follow.
 public struct LinkStatusView: View {
     private let model: GatewayModel
+    private let notifications: NotificationCoordinator?
 
-    public init(model: GatewayModel) {
+    public init(model: GatewayModel, notifications: NotificationCoordinator? = nil) {
         self.model = model
+        self.notifications = notifications
     }
 
     public var body: some View {
@@ -47,6 +49,45 @@ public struct LinkStatusView: View {
                 }
                 if model.duplicatesRefused > 0 {
                     LabeledContent("Refused as duplicate", value: "\(model.duplicatesRefused)")
+                }
+            }
+
+            if let notifications {
+                Section(Copy.notificationSectionTitle) {
+                    // The same three-cue discipline the connection badge uses:
+                    // the word first, then the sentence, then the colour.
+                    LabeledContent("Permission", value: notifications.authorization.rawValue)
+                    Text(Copy.notificationDescription(notifications.authorization))
+                        .font(.footnote)
+                        .foregroundStyle(
+                            notifications.authorization.canDeliver
+                                ? Color.secondary
+                                : Color.red
+                        )
+                    // The ask lives here rather than at launch, so it is made
+                    // next to the sentence saying what it is for. Once refused
+                    // it does not come back — iOS shows the prompt once — and
+                    // the description says to go to Settings instead.
+                    if notifications.authorization == .notDetermined {
+                        Button(Copy.notificationPermissionAsk) {
+                            Task { await notifications.requestAuthorization() }
+                        }
+                    }
+                    LabeledContent("Delivered", value: "\(notifications.delivered)")
+                    if notifications.withdrawn > 0 {
+                        LabeledContent("Withdrawn", value: "\(notifications.withdrawn)")
+                    }
+                    let duplicates = notifications.suppressed(.alreadyNotified)
+                    if duplicates > 0 {
+                        LabeledContent("Repeats suppressed", value: "\(duplicates)")
+                    }
+                    let blocked = notifications.suppressed(.notAuthorized)
+                    if blocked > 0 {
+                        LabeledContent("Blocked by permission", value: "\(blocked)")
+                    }
+                    if notifications.decisionFailures > 0 {
+                        LabeledContent("Decisions refused", value: "\(notifications.decisionFailures)")
+                    }
                 }
             }
 

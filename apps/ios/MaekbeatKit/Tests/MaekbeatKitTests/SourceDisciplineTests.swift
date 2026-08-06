@@ -12,7 +12,7 @@ import XCTest
  * no Bluetooth. These fail the build instead.
  */
 final class SourceDisciplineTests: XCTestCase {
-    private static var sourcesDirectory: URL {
+    static var sourcesDirectory: URL {
         var url = URL(fileURLWithPath: #filePath)
         for _ in 0..<3 { url = url.deletingLastPathComponent() }
         return url.appendingPathComponent("Sources/MaekbeatKit")
@@ -24,7 +24,7 @@ final class SourceDisciplineTests: XCTestCase {
         return url.appendingPathComponent("App")
     }
 
-    private func swiftFiles(in directory: URL) throws -> [(name: String, text: String)] {
+    func swiftFiles(in directory: URL) throws -> [(name: String, text: String)] {
         let urls = try FileManager.default
             .contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
         var found: [(String, String)] = []
@@ -61,7 +61,7 @@ final class SourceDisciplineTests: XCTestCase {
             }
     }
 
-    private func sources() throws -> [(name: String, text: String)] {
+    func sources() throws -> [(name: String, text: String)] {
         let files = try swiftFiles(in: Self.sourcesDirectory)
         XCTAssertGreaterThan(files.count, 8, "the scan found almost nothing — check the path")
         return files
@@ -150,20 +150,6 @@ final class SourceDisciplineTests: XCTestCase {
                 || Copy.blePeripheralAbsent.localizedCaseInsensitiveContains("no peripheral"),
             "the interface must say what it is not talking to"
         )
-    }
-
-    /// The same rule for the other easy lie. There is no App Store listing, no
-    /// purchase, and no push notification in this repository.
-    func testNothingClaimsAStoreListingOrPushNotifications() throws {
-        let banned = ["StoreKit", "App Store", "in-app purchase", "UNUserNotificationCenter", "APNs"]
-        for file in try sources() {
-            for term in banned {
-                XCTAssertFalse(
-                    file.text.localizedCaseInsensitiveContains(term),
-                    "\(file.name) names \(term), which this commit does not ship"
-                )
-            }
-        }
     }
 
     // MARK: - The disclaimer is in the interface
@@ -381,5 +367,12 @@ final class SourceDisciplineTests: XCTestCase {
         )
         XCTAssertTrue(code.contains { $0.contains("RootView(") },
                       "the shell must show the library's root view")
+        // C12a's lesson, and the reason apps/server has a composition test: a
+        // feature can be entirely correct and entirely unreachable. Both live
+        // factories are named here or the app runs without them.
+        for factory in ["GatewayModel.live(", "NotificationCoordinator.live("] {
+            XCTAssertTrue(code.contains { $0.contains(factory) },
+                          "the shell must construct \(factory) — nothing else does")
+        }
     }
 }

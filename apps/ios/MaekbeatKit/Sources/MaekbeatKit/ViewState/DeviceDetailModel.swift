@@ -28,6 +28,10 @@ public final class DeviceDetailModel {
     public static let windowLimit = 600
 
     private let client: APIClient
+    /// Where alerts become notifications. Optional because the device screen is
+    /// useful without one — and injected rather than constructed, because the
+    /// coordinator is one per app while this model is one per device.
+    private let notifications: NotificationCoordinator?
     private let createSocket: SocketFactory?
     private let schedule: Scheduler?
     private var stream: StreamClient?
@@ -35,11 +39,13 @@ public final class DeviceDetailModel {
     public init(
         deviceId: String,
         client: APIClient,
+        notifications: NotificationCoordinator? = nil,
         createSocket: SocketFactory? = nil,
         schedule: Scheduler? = nil
     ) {
         self.deviceId = deviceId
         self.client = client
+        self.notifications = notifications
         self.createSocket = createSocket
         self.schedule = schedule
     }
@@ -57,6 +63,13 @@ public final class DeviceDetailModel {
             let alertsPage = try await client.alerts(deviceId: deviceId)
             alerts = alertsPage.alerts
             decisions = latestDecisions(alertsPage.decisions)
+            // The seed is history, and after a reconnect it is history this
+            // phone has already seen. The policy is what stops it becoming a
+            // second round of banners; offering it here is what lets the policy
+            // decide rather than the caller guessing.
+            for alert in alertsPage.alerts {
+                notifications?.handle(alert, decided: decisions[alert.alertId] != nil)
+            }
         } catch let failure as APIFailure {
             frames = .failed(failure)
         } catch {
@@ -113,8 +126,12 @@ public final class DeviceDetailModel {
             merge(frame)
         case let .alert(alert):
             mergeAlert(alert)
+            notifications?.handle(alert, decided: decisions[alert.alertId] != nil)
         case let .decision(decision):
             apply(decision)
+            // A decision from any client closes the episode here too, so the
+            // banner does not outlive the judgement somebody already made.
+            notifications?.handleDecision(alertId: decision.alertId)
         }
     }
 

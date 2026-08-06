@@ -182,6 +182,39 @@ enum IngestWire {
     }
 }
 
+/// A fake notification centre. Records what it was asked to do, and lets a test
+/// set what the user has allowed without a user.
+@MainActor
+final class FakeNotificationPort: NotificationPort {
+    var authorization: NotificationAuthorization = .authorized
+    /// What `requestAuthorization()` will return — the answer the prompt gets.
+    var promptAnswer: NotificationAuthorization?
+    private(set) var scheduled: [CaregiverNotification] = []
+    private(set) var withdrawn: [String] = []
+    private(set) var prompts = 0
+    private(set) var categoryRegistrations = 0
+
+    func registerCategories() { categoryRegistrations += 1 }
+
+    func currentAuthorization() async -> NotificationAuthorization { authorization }
+
+    @discardableResult
+    func requestAuthorization() async -> NotificationAuthorization {
+        prompts += 1
+        authorization = promptAnswer ?? authorization
+        return authorization
+    }
+
+    func schedule(_ notification: CaregiverNotification) { scheduled.append(notification) }
+    func withdraw(alertId: String) { withdrawn.append(alertId) }
+
+    /// The banners a caregiver would be looking at: scheduled and not taken
+    /// back. The identifier is the alertId, so a re-schedule replaces.
+    var standing: Set<String> {
+        Set(scheduled.map(\.identifier)).subtracting(withdrawn)
+    }
+}
+
 // MARK: - Wire fixtures
 
 enum Wire {

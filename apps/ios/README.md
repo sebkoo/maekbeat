@@ -1,6 +1,6 @@
 # Maekbeat for iOS
 
-C14–C15 of [docs/ROADMAP.md](../../docs/ROADMAP.md): a SwiftUI app that reads a local [apps/server](../server) over REST, subscribes to its WebSocket fan-out, and — since C15 — implements the BLE central role of [docs/ble-gatt-profile.md](../../docs/ble-gatt-profile.md) and forwards what it receives to `/ingest`. SwiftLint gates the sources, XCTest gates the behaviour, and a line-coverage ratchet gates the suite.
+C14–C16 of [docs/ROADMAP.md](../../docs/ROADMAP.md): a SwiftUI app that reads a local [apps/server](../server) over REST, subscribes to its WebSocket fan-out, implements the BLE central role of [docs/ble-gatt-profile.md](../../docs/ble-gatt-profile.md), forwards what it receives to `/ingest`, and — since C16 — turns the server's alerts into local notifications a caregiver can answer. SwiftLint gates the sources, XCTest gates the behaviour, and a line-coverage ratchet gates the suite.
 
 ## What runs today
 
@@ -8,7 +8,9 @@ A simulator app talking to a Maekbeat server on your Mac, plus a CoreBluetooth c
 
 That second half needs saying precisely, because it is the easiest thing in this repository to overstate. **The app does not monitor a wearable.** It implements the central role of a documented profile, and no hardware anywhere speaks that profile. Scanning starts, finds nothing, and the link state machine says so. What C15 adds is the code that would run if a peripheral existed, the state machine that decides what to do when it does not, and an honest account of which of those two can be tested and which cannot.
 
-Still absent, and still guarded: no App Store presence, no in-app purchase, no push notification — caregiver notifications are C16. A source scan in [MaekbeatKit/Tests/MaekbeatKitTests/SourceDisciplineTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/SourceDisciplineTests.swift) fails the build on any of those, on a user-visible string claiming a device is attached, and on the CoreBluetooth framework appearing in any file but the adapter.
+C16 adds the notification half, and it needs the same precision. The notifications are **local** ones: the phone is already subscribed to the server's fan-out, so it schedules a banner from an alert it received itself. There is no push server, no device token, and no APNs — nothing in this repository could deliver a notification to a phone that is not running.
+
+Still absent, and still guarded: no App Store presence, no in-app purchase, no remote push. Source scans in [SourceDisciplineTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/SourceDisciplineTests.swift) and [NotificationDisciplineTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/NotificationDisciplineTests.swift) fail the build on any of those, on a user-visible string claiming a device is attached, and on either framework — CoreBluetooth or UserNotifications — appearing in any file but its own adapter.
 
 ```sh
 pnpm --filter @maekbeat/server dev     # shell 1: the API
@@ -121,6 +123,66 @@ That suite corrected the documentation twice, which is the argument for it exist
 
 1. The server calls a device's **first** frame a new session, so a run containing one reboot reports two. That was learned from an assertion that failed.
 2. The residual limit is worse than the protocol README predicted. It expected an in-window reboot to be absorbed by the server as duplicates. It never reaches the server: the gateway's own resume rule refuses to send anything at or below the last acknowledged `seq`, so a peripheral that reboots before its counter passes 64 has its new session's early frames dropped **on the phone**, silently, until `seq` climbs past the old high-water mark. That is data loss rather than deduplication. The fix is the one already named — a wire-level boot id, which is a `v` bump — and until then it is a stated limit with a test that demonstrates it.
+
+## Caregiver notifications (C16)
+
+The circuit this commit closes: a rule in [apps/server/src/alerts.ts](../server/src/alerts.ts) fires, the alert reaches this phone on the fan-out socket it was already holding, a banner appears with two buttons, and the caregiver's answer lands in the same append-only decision log the dashboard writes to — same route, same `alertId`, same `POST /devices/:id/alerts/:alertId/decisions`. The only difference from a dashboard decision is the `actor` field, which reads `ios-gateway` instead of `web-dashboard`.
+
+### One episode, one banner
+
+The bug this design exists to prevent is one the client manufactures on its own. The server guarantees one raise per breach episode (C7), but a phone that notifies on every alert message it receives notifies again after every reconnect — a reconnect re-reads the alert history over REST and the fan-out replays transitions. Nothing on the server is wrong in that story and the caregiver is buried anyway.
+
+So the decision lives in [NotificationPolicy.swift](MaekbeatKit/Sources/MaekbeatKit/Notifications/NotificationPolicy.swift), a value type with no framework in it, which keys on `alertId` in two ways at once: a `notified` set it consults before scheduling, and the OS-level notification identifier, which is the `alertId` itself — so even a policy bug replaces a banner rather than stacking one. Suppressions are counted by reason and shown on the link screen rather than swallowed.
+
+C15's invariant carries over unchanged: every scheduled effect has an owner state, and leaving that state cancels it. A notification's owner is the open episode. The episode resolving, or anyone deciding on it from any client, withdraws the banner — a caregiver should not be left holding an alert somebody else already handled.
+
+**What an integration test found that fourteen unit tests did not.** The first version keyed the notify decision on `state == .raised`, and every test in `NotificationPolicyTests` agreed, because every one of them started from a `raised`. The real server does not: it mutates a stored alert to `ongoing` on the second breaching sample, so `GET /devices/:id/alerts` reports every live episode as `ongoing`. The REST seed is the only path a cold launch has, which made the silent case the one that matters — an episode running right now, on a phone that has never heard of it. Designing against duplicate banners had produced a missing one. The rule is now that an _open, unseen_ episode notifies however it arrived, and the two suppression reasons stay apart only to say why a repeat was refused.
+
+### Wording, and what a notification may not say
+
+A notification is labelling, and labelling is subject to [G3](../../CLAUDE.md). The body says a demo threshold rule fired on synthetic data, names the metric and the direction, and stops. For the alert the tests build, verbatim:
+
+> `spo2Pct went below a demo threshold at 00:00:40 UTC. Synthetic data from a simulated device; not a medical device.`
+
+`spo2Pct went below a demo threshold` is a statement about a rule in a file in this repository. "Low blood oxygen" would be a statement about a person, and there is no person. [NotificationCopyTests.swift](MaekbeatKit/Tests/MaekbeatKitTests/NotificationCopyTests.swift) holds the wording to a banned-word list covering diagnosis, urgency and instruction — the lock screen is exactly where a demo starts sounding like a device.
+
+The body does not say "not a diagnosis" even though it would be true. The word list is total, prose included, and a disclaimer that has to be exempted from a ban weakens the ban for everything else.
+
+### Permission is a state, not an error path
+
+`denied` is the state this app has to be loudest about, because a monitoring app whose notifications are silently refused is worse than one with none: the person believes they are covered. It gets the same three-cue treatment the connection badge gets — the word, then a sentence saying what is lost, then colour — and every one of the five authorization states is rendered by a test rather than assumed.
+
+The ask is a button on the link screen, next to that sentence, rather than a prompt at launch. iOS shows the system prompt once per install; asking before the user has seen what it is for spends the only chance there is.
+
+### What CI verifies about notifications, and what needs a device
+
+| Behaviour                                                        | Verified by CI                                | Needs a physical device |
+| ---------------------------------------------------------------- | --------------------------------------------- | ----------------------- |
+| Dedupe across reconnect, replay and re-seed                      | yes — pure policy, and through the view model | no                      |
+| Withdrawal on resolve, on decision, from any client              | yes                                           | no                      |
+| Every authorization state rendering, `denied` loudest            | yes — all five, in a real window              | no                      |
+| The decision round-trip into the server's own log                | yes — against a real `apps/server` process    | no                      |
+| Authorization translation for every framework case               | yes — pure function                           | no                      |
+| The request and category the centre would be handed              | yes — built, then inspected                   | no                      |
+| **Any call on `UNUserNotificationCenter` itself**                | **no** — see below                            | **yes**                 |
+| The permission prompt, and what a person answers                 | **no**                                        | **yes**                 |
+| A banner appearing, and its buttons working from the lock screen | **no**                                        | **yes**                 |
+| Delivery while backgrounded, suspended or terminated             | **no**                                        | **yes**                 |
+
+The seventh row is a harder line than C15's radio, which at least constructs on a simulator. `UNUserNotificationCenter.current()` raises `NSInternalInconsistencyException` — `bundleProxyForCurrentProcess is nil` — in a SwiftPM test bundle on macOS _and_ on the simulator, because the xctest agent has no app bundle proxy. Every instance method on [UserNotificationCenterAdapter.swift](MaekbeatKit/Sources/MaekbeatKit/Notifications/UserNotificationCenterAdapter.swift) is therefore unexercised by any gate here, not merely unverified in its effect. Closing that would take an app-hosted test target, which this package does not have. A test was written against a real centre during this commit and deleted when it turned out to be unrunnable rather than merely failing; the adapter's header says so.
+
+That is the reason the adapter holds no decisions at all. It translates an authorization status, builds a request, builds a category, and forwards four calls. A test scans it for the symbols that would indicate otherwise and caps it at ninety lines.
+
+**Background reality.** Nothing about background delivery has been observed on a device by this author. What is documented: a local notification scheduled with no trigger is delivered by the system whether or not the app is running, so the delivery leg does not depend on background execution. What the _alert_ depends on is the app being alive to receive it — the socket in [StreamClient.swift](MaekbeatKit/Sources/MaekbeatKit/Transport/StreamClient.swift) is an ordinary `URLSessionWebSocketTask` with no background mode of its own, so a suspended or force-quit app hears nothing to notify about. The `bluetooth-central` mode may keep the app alive for BLE traffic; it makes no promise about a WebSocket. **Unverified by me:** all of it, plus whether a notification action taken while the app is terminated relaunches it in time for `act(_:on:)` to reach the server.
+
+**How someone with a device would verify the untested rows.** Run a `Debug` build on a real iPhone against a Maekbeat server on the LAN, allow notifications when the link screen asks, and run `pnpm --filter @maekbeat/server demo`, which streams the anomaly scenario:
+
+1. **One banner.** The episode should produce exactly one, with `Acknowledge` and `Dismiss` on it.
+2. **The circuit.** Tap `Acknowledge` from the lock screen. `GET /devices/sim-001/alerts` should show the decision with `actor: "ios-gateway"`, and the dashboard should show it too.
+3. **No storm.** Turn Wi-Fi off and on to force a reconnect and re-seed. No second banner.
+4. **The other client.** Acknowledge on the dashboard instead. The phone's banner should disappear on its own.
+
+None of that has been run. It is a procedure, not a result.
 
 ## The cross-language contract
 

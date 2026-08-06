@@ -9,14 +9,16 @@ import SwiftUI
 public struct RootView: View {
     private let client: APIClient
     private let gateway: GatewayModel
+    private let notifications: NotificationCoordinator
 
     /// Both dependencies are injected with no defaults. A default `GatewayModel`
     /// would have to choose between activating a real radio — which raises in a
     /// test bundle that declares no background mode — and a quiet stub that
     /// differs from what the app runs. Neither belongs in a default argument.
-    public init(client: APIClient, gateway: GatewayModel) {
+    public init(client: APIClient, gateway: GatewayModel, notifications: NotificationCoordinator) {
         self.client = client
         self.gateway = gateway
+        self.notifications = notifications
     }
 
     public var body: some View {
@@ -24,17 +26,18 @@ public struct RootView: View {
             DisclaimerBar()
             TabView {
                 NavigationStack {
-                    DeviceListView(client: client)
+                    DeviceListView(client: client, notifications: notifications)
                 }
                 .tabItem { Label(Copy.deviceListTitle, systemImage: "list.bullet") }
 
                 NavigationStack {
-                    LinkStatusView(model: gateway)
+                    LinkStatusView(model: gateway, notifications: notifications)
                 }
                 .tabItem {
                     Label(Copy.linkSectionTitle, systemImage: "antenna.radiowaves.left.and.right")
                 }
             }
         }
+        .task { await notifications.prepare() }
     }
 }

@@ -62,7 +62,11 @@ final class ViewRenderingTests: XCTestCase {
     // MARK: - The disclaimer and the shell
 
     func testTheRootScreenRenders() {
-        render(RootView(client: client, gateway: gateway()))
+        render(RootView(
+            client: client,
+            gateway: gateway(),
+            notifications: NotificationCoordinator(port: FakeNotificationPort(), client: client)
+        ))
     }
 
     /// Every link state the gateway can be in, laid out. `recovering` is the one
@@ -118,6 +122,72 @@ final class ViewRenderingTests: XCTestCase {
         XCTAssertGreaterThan(model.rejectedLinkEvents, 0)
         XCTAssertEqual(model.undecodablePayloads, 1)
         render(LinkStatusView(model: model))
+    }
+
+    /// The notification section in every authorization state, because the one
+    /// that matters most is the one a happy-path test never reaches: a refused
+    /// permission has to render, and render differently, or a caregiver is left
+    /// believing they are covered.
+    func testTheLinkScreenRendersEveryNotificationPermissionState() async {
+        for authorization in NotificationAuthorization.allCases {
+            let radio = FakeTransport()
+            let sockets = FakeIngestTransport()
+            let model = GatewayModel(
+                driver: BLEDriver(port: MockPeripheralPort(), schedule: radio.scheduler),
+                ingest: IngestClient(url: StubHTTP.baseURL,
+                                     createSocket: sockets.factory,
+                                     schedule: radio.scheduler)
+            )
+            let port = FakeNotificationPort()
+            port.authorization = authorization
+            let coordinator = NotificationCoordinator(port: port, client: StubHTTP().client)
+            await coordinator.refreshAuthorization()
+
+            XCTAssertEqual(coordinator.authorization, authorization)
+            XCTAssertFalse(Copy.notificationDescription(authorization).isEmpty)
+            render(LinkStatusView(model: model, notifications: coordinator))
+        }
+    }
+
+    /// And with every counter non-zero, so the rows that only appear when
+    /// something has gone wrong are rendered rather than assumed.
+    func testTheLinkScreenRendersTheNotificationCountersItOnlyShowsWhenNonZero() async throws {
+        let radio = FakeTransport()
+        let sockets = FakeIngestTransport()
+        let model = GatewayModel(
+            driver: BLEDriver(port: MockPeripheralPort(), schedule: radio.scheduler),
+            ingest: IngestClient(url: StubHTTP.baseURL,
+                                 createSocket: sockets.factory,
+                                 schedule: radio.scheduler)
+        )
+        let port = FakeNotificationPort()
+        let stub = StubHTTP(answers: [
+            (Data(#"{"statusCode":404,"message":"gone"}"#.utf8), 404)
+        ])
+        let coordinator = NotificationCoordinator(port: port, client: stub.client)
+        await coordinator.refreshAuthorization()
+
+        let alert = try Self.raisedAlert()
+        coordinator.handle(alert, decided: false)          // delivered
+        coordinator.handle(alert, decided: false)          // suppressed as a repeat
+        await coordinator.act(.acknowledge, on: try XCTUnwrap(port.scheduled.first))
+        port.authorization = .denied
+        await coordinator.refreshAuthorization()
+        coordinator.handle(try Self.raisedAlert(id: "sim-001:hr-high:2"), decided: false)
+
+        XCTAssertEqual(coordinator.delivered, 1)
+        XCTAssertEqual(coordinator.decisionFailures, 1)
+        XCTAssertGreaterThan(coordinator.suppressed(.alreadyNotified), 0)
+        XCTAssertGreaterThan(coordinator.suppressed(.notAuthorized), 0)
+        render(LinkStatusView(model: model, notifications: coordinator))
+    }
+
+    private static func raisedAlert(id: String = "sim-001:spo2-low:1") throws -> AlertEvent {
+        let json = Wire.alertMessage(alertId: id)
+        guard case let .alert(event) = try StreamDecoder.message(from: Data(json.utf8)) else {
+            throw ContractError.unknownMessageType("alert")
+        }
+        return event
     }
 
     func testTheLinkScreenRendersAnUnusableRadioAndABacklog() {

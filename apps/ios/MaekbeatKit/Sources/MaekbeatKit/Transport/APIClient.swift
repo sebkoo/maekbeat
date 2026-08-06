@@ -44,22 +44,33 @@ public typealias HTTPTransport = @Sendable (URLRequest) async throws -> (Data, U
 
 /// A typed client over the apps/server read surface.
 ///
-/// The five HTTP routes here are the ones apps/server/src/openapi.test.ts pins.
-/// `POST /devices/:id/alerts/:id/decisions` is deliberately absent: this app
-/// reads, and acknowledgement is the dashboard's job until an iOS commit claims
-/// it. Writing a route nobody calls would be a claim about a feature.
+/// The six HTTP routes here are the ones apps/server/src/openapi.test.ts pins.
+/// `POST /devices/:id/alerts/:id/decisions` arrived at C16 with the commit that
+/// calls it: a notification action records a decision, and it has to land in
+/// the same append-only log the dashboard writes to, under the same `alertId`.
+/// Until then it was deliberately absent, because a route nobody calls is a
+/// claim about a feature.
 public struct APIClient: Sendable {
     public let baseURL: URL
     private let transport: HTTPTransport
     private let decoder: JSONDecoder
 
-    public init(
-        baseURL: URL,
-        transport: @escaping HTTPTransport = { try await URLSession.shared.data(for: $0) }
-    ) {
+    public init(baseURL: URL, transport: HTTPTransport? = nil) {
         self.baseURL = baseURL
-        self.transport = transport
+        self.transport = transport ?? Self.urlSession
         self.decoder = JSONDecoder()
+    }
+
+    /// A stored property rather than a default argument. Written as
+    /// `transport: @escaping HTTPTransport = { try await URLSession.shared... }`
+    /// it segfaults in `swift_task_dealloc` under Swift 5.10 whenever the call
+    /// is made from an async context — the default-argument generator emits the
+    /// async closure's context onto the caller's task stack and then frees it
+    /// twice. Every unit test passed a transport explicitly, so the first call
+    /// site to take the default from an `async` function was C16's integration
+    /// test, and it crashed the process rather than failing.
+    private static let urlSession: HTTPTransport = {
+        try await URLSession.shared.data(for: $0)
     }
 
     /// The default server a simulator build talks to. `127.0.0.1` resolves to
@@ -89,6 +100,27 @@ public struct APIClient: Sendable {
 
     public func alerts(deviceId: String) async throws -> AlertsPage {
         try await get(AlertsPage.self, path: alertsPath(deviceId))
+    }
+
+    /// Records a caregiver's decision on one alert — the write half of the
+    /// C12 acknowledgement contract, and the last leg of the C16 circuit.
+    ///
+    /// The server appends rather than updates, so a change of mind is a second
+    /// event and the newest one is in force. A refusal is surfaced, never
+    /// swallowed: the phone must not show a decision the log does not hold.
+    @discardableResult
+    public func recordDecision(
+        deviceId: String,
+        alertId: String,
+        decision: AlertDecision,
+        actor: String = "ios-gateway"
+    ) async throws -> AlertDecisionEvent {
+        let path = "\(alertsPath(deviceId))/\(escape(alertId))/decisions"
+        return try await post(
+            AlertDecisionEvent.self,
+            path: path,
+            body: ["decision": decision.rawValue, "actor": actor]
+        )
     }
 
     /// The fan-out socket `StreamClient` opens — the same endpoint the
@@ -141,6 +173,21 @@ public struct APIClient: Sendable {
         return components?.url ?? baseURL
     }
 
+    private func post<T: Decodable>(
+        _ type: T.Type,
+        path: String,
+        body: [String: String]
+    ) async throws -> T {
+        guard let url = makeURL(path: path) else {
+            throw APIFailure.network("could not build a URL for \(path)")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+        request.httpBody = try? JSONEncoder().encode(body)
+        return try await send(type, request: request)
+    }
+
     private func get<T: Decodable>(
         _ type: T.Type,
         path: String,
@@ -149,11 +196,14 @@ public struct APIClient: Sendable {
         guard let url = makeURL(path: path, query: query) else {
             throw APIFailure.network("could not build a URL for \(path)")
         }
+        return try await send(type, request: URLRequest(url: url))
+    }
 
+    private func send<T: Decodable>(_ type: T.Type, request: URLRequest) async throws -> T {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await transport(URLRequest(url: url))
+            (data, response) = try await transport(request)
         } catch {
             throw APIFailure.network(error.localizedDescription)
         }

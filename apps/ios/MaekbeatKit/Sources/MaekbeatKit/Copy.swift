@@ -50,6 +50,32 @@ public enum Copy {
         }
     }
 
+    public static let notificationSectionTitle = "Notifications"
+
+    /// The ask, offered next to the sentence saying what it is for rather than
+    /// fired at launch. iOS shows the system prompt once per install.
+    public static let notificationPermissionAsk = "Allow notifications"
+
+    /// One line per authorization state, in the user's terms. `denied` is the
+    /// one that has to be loudest: a monitoring app whose notifications are
+    /// silently refused is worse than one with none, because the person
+    /// believes they are covered.
+    public static func notificationDescription(_ state: NotificationAuthorization) -> String {
+        switch state {
+        case .notDetermined:
+            return "Not asked yet. Nothing will be delivered until you allow it."
+        case .denied:
+            return "Refused. No alert will reach you on this phone — the app cannot "
+                + "notify you of anything while this says refused. Change it in Settings."
+        case .restricted:
+            return "Blocked by a device policy. Nothing will be delivered."
+        case .provisional:
+            return "Delivered quietly to the notification centre, without a banner."
+        case .authorized:
+            return "Allowed. A demo rule firing will notify you once per episode."
+        }
+    }
+
     public static let appName = "Maekbeat"
     public static let deviceListTitle = "Devices"
 

@@ -94,7 +94,9 @@ final class ServerProcess {
         let health = baseURL.appendingPathComponent("healthz")
         while Date() < deadline {
             if (try? Data(contentsOf: health)) != nil { return }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            // A blocking sleep, not a run loop: this runs before any async work
+            // and must not depend on the cooperative pool.
+            Thread.sleep(forTimeInterval: 0.1)
         }
         stop()
         throw Failure.neverStarted
@@ -146,7 +148,15 @@ final class Rig {
     private let driver: BLEDriver
     private let ingest: IngestClient
 
+    let port: Int
+
+    /// The server this rig is driving, for tests that also want the REST side.
+    var baseURL: URL {
+        URL(string: "http://127.0.0.1:\(port)") ?? APIClient.defaultBaseURL
+    }
+
     init(port: Int) {
+        self.port = port
         let url = URL(string: "ws://127.0.0.1:\(port)/ingest")
             ?? APIClient.defaultBaseURL
         var made: [ControllableIngestSocket] = []
@@ -163,7 +173,11 @@ final class Rig {
             driver.handle(event)
         }
         socketsProvider = { made }
-        wait(until: { self.model.uplink == .live }, "the uplink to open")
+    }
+
+    /// Separate from `init` because it awaits: a Swift initialiser cannot.
+    func open() async {
+        await wait(until: { self.model.uplink == .live }, "the uplink to open")
     }
 
     private var socketsProvider: () -> [ControllableIngestSocket] = { [] }
@@ -177,8 +191,8 @@ final class Rig {
     /// Lets anything in flight land, for assertions about what did *not*
     /// happen. A bare assertion after a send would pass before the server had
     /// a chance to disagree.
-    func settle(seconds: TimeInterval = 1.5) {
-        RunLoop.current.run(until: Date().addingTimeInterval(seconds))
+    func settle(seconds: TimeInterval = 1.5) async {
+        try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
     }
 
     /// Frames as the radio would deliver them: encoded to the GATT payload and
@@ -205,19 +219,57 @@ final class Rig {
         for seq in range { ingest.send(frame(seq)) }
     }
 
-    func dropTheSocket() {
+    func dropTheSocket() async {
         socketsProvider().last?.forceDrop()
-        wait(until: { self.model.uplink == .live }, "the uplink to come back", timeout: 30)
+        await wait(until: { self.model.uplink == .live }, "the uplink to come back", timeout: 30)
     }
 
-    func waitForAcks(_ count: Int) {
-        wait(until: { self.model.accepted >= count }, "\(count) acks")
+    func waitForAcks(_ count: Int) async {
+        await wait(until: { self.model.accepted >= count }, "\(count) acks")
         XCTAssertEqual(model.accepted, count, "more frames were accepted than were sent")
     }
 
-    func waitForReplies(_ count: Int) {
-        wait(until: { self.model.accepted + self.model.duplicatesRefused >= count },
-             "\(count) replies")
+    func waitForReplies(_ count: Int) async {
+        await wait(until: { self.model.accepted + self.model.duplicatesRefused >= count },
+                   "\(count) replies")
+    }
+
+    /// Raises a real alert on the real engine by streaming the anomaly the
+    /// server's own rules fire on, and stops as soon as the episode is open.
+    ///
+    /// Streaming the whole fixture would not do: it dips and then recovers, so
+    /// the last frame leaves the episode `resolved` and there is no standing
+    /// alert for a caregiver to be notified about. Feeding it a chunk at a time
+    /// and stopping at the first open episode is also the honest shape — this
+    /// is what a phone sees mid-breach, which is the only moment a notification
+    /// makes sense.
+    func raiseRealAlert() async throws -> AlertEvent {
+        let api = APIClient(baseURL: baseURL)
+        let frames = takeAnomalyFrames()
+        var sent = 0
+
+        while sent < frames.count {
+            let chunk = frames[sent..<min(sent + 10, frames.count)]
+            for frame in chunk {
+                driver.receive(payload: GattProfile.encode(frame), from: "sim-001")
+            }
+            sent += chunk.count
+            await waitForAcks(sent)
+
+            let page = try await api.alerts(deviceId: "sim-001")
+            if let open = page.alerts.first(where: { $0.state != .resolved }) {
+                return open
+            }
+        }
+        throw Failure.noAlertRaised
+    }
+
+    enum Failure: Error { case noAlertRaised }
+
+    /// The desaturation the C7 rules raise on, as the goldens hold it.
+    private func takeAnomalyFrames() -> [VitalsFrame] {
+        let lines = (try? GoldenFixture.lines(for: .anomaly))?.frames ?? []
+        return lines.compactMap { try? VitalsDecoder.frame(from: $0) }
     }
 
     private func frame(_ seq: Int) -> VitalsFrame {
@@ -232,17 +284,21 @@ final class Rig {
         )
     }
 
+    /// Polls with `Task.sleep` rather than by spinning a run loop:
+    /// `RunLoop.run(until:)` is unavailable from an async context, and every
+    /// test in this suite is async since one of them awaits a REST read. The
+    /// sync version blocked the cooperative thread and took the process with it.
     private func wait(
         until condition: () -> Bool,
         _ what: String,
         timeout: TimeInterval = 30,
         file: StaticString = #filePath,
         line: UInt = #line
-    ) {
+    ) async {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if condition() { return }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            try? await Task.sleep(nanoseconds: 20_000_000)
         }
         XCTFail("timed out waiting for \(what)", file: file, line: line)
     }

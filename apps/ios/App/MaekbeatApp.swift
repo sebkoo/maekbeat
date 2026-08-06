@@ -17,7 +17,8 @@ struct MaekbeatApp: App {
         WindowGroup {
             RootView(
                 client: APIClient(baseURL: Self.baseURL),
-                gateway: GatewayModel.live(baseURL: Self.baseURL)
+                gateway: GatewayModel.live(baseURL: Self.baseURL),
+                notifications: NotificationCoordinator.live(baseURL: Self.baseURL)
             )
         }
     }

@@ -519,3 +519,64 @@ changed. Adding a guard to `GattProfileTests.swift` made the notice list it
 immediately; reverting removed it. That is the property the row claims, verified
 directly rather than through a pass/fail the harness could misread — which is
 the same lesson as the `.pbxproj` episode one section up, applied before it bit.
+
+## C16 — caregiver notifications
+
+Fourteen mutations, each verified to have taken effect before its result was
+read, per the sequenced rule the `.pbxproj` episode forced. Every one caught,
+with two entries below that are not pass/fail rows and say so.
+
+| Guard                                    | Own mutation                                     | Neighbour mutation                      | Result |
+| ---------------------------------------- | ------------------------------------------------ | --------------------------------------- | ------ |
+| one episode, one banner                  | never record an episode as notified              | a first raise still notifies            | caught |
+| a decided episode stays closed           | drop the `closed` guard                          | a first raise still notifies            | caught |
+| nothing is scheduled while denied        | drop the authorization guard                     | an authorized alert still notifies      | caught |
+| an open episode notifies however it came | key the decision on `raised` again               | an `ongoing` repeat is still suppressed | caught |
+| the owner state withdraws its banner     | resolution suppresses instead of withdrawing     | a first raise still notifies            | caught |
+| the two suppression reasons stay apart   | collapse `notANewEpisode` into `alreadyNotified` | the reconnect-storm count is unchanged  | caught |
+| the identifier is the `alertId`          | append a suffix to it                            | the denied path is unaffected           | caught |
+| the body does not diagnose               | reword it to "is dangerously below normal"       | the policy is unaffected                | caught |
+| launch registers the actions             | drop `registerCategories()` from `prepare()`     | scheduling still works                  | caught |
+| the record lands before the banner goes  | withdraw first, then post                        | a dashboard decision still withdraws    | caught |
+| socket alerts reach the centre           | stop routing `.alert` to the coordinator         | the REST seed still routes              | caught |
+| the REST seed goes through the policy    | stop routing the seed                            | the socket still routes                 | caught |
+| a decision on the socket withdraws       | stop routing `.decision`                         | the socket alert path still routes      | caught |
+| the shell constructs the coordinator     | delete the `NotificationCoordinator.live(` call  | —                                       | caught |
+
+Two entries are weaker than the table's other rows, and flattening them into it
+would misreport what was checked.
+
+**`RootView` prepares the centre** is a source scan, not a behavioural
+assertion. Deleting the `.task { await notifications.prepare() }` line fails
+`testTheRootScreenPreparesTheNotificationCentre`, so the mutation is caught —
+but what is caught is the line being written, not the call happening. A rendered
+SwiftUI view does not run its own `.task` in these tests, and no assertion
+available here would notice a `prepare()` that never fired. The distinction is
+recorded rather than papered over.
+
+**Percent-encoding the `alertId`** is an equivalent mutant, not a test gap.
+Switching `escape` from `.urlPathAllowed` to `.alphanumerics` turns
+`sim-001:spo2-low:1` into `sim%2D001%3Aspo2%2Dlow%3A1` on the wire — and nothing
+fails, at either level. The unit assertion reads `URL.path`, which decodes; the
+real server decodes too and files the decision under the same id. Both spellings
+are the same request by the time anything acts on it, so there is no behaviour
+to pin. Per the three-branch rule in AI_USAGE.md this is branch (c) for the
+_choice_ — no test was added for it — while the `/` replacement beside it is
+branch (b) and already has one at `APIClientTests.swift`.
+
+### The integration test earns its place
+
+The clearest evidence for spawning a real `apps/server` is a mutation the
+stubbed suite cannot see. Sending `"acknowledge"` where the protocol says
+`"acknowledged"` — one dropped suffix in the request body — leaves the whole
+simulator gate green, all 243 tests, because a stub answers whatever it was
+handed. The real server
+rejects it, and `testANotificationActionRecordsADecisionInTheServersOwnLog`
+fails on three assertions at once: no decision recorded, one failure counted,
+nothing in the log.
+
+That is the same category as C15's resume tests correcting the protocol README
+twice, and it happened again here in the other direction: the integration test
+also found the `ongoing` hole described in apps/ios/README.md, which every test in
+`NotificationPolicyTests` had agreed about. A suite can only test what it assumes the
+other side says.

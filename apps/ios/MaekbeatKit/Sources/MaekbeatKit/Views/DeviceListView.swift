@@ -5,16 +5,19 @@ import SwiftUI
 public struct DeviceListView: View {
     @State private var model: DeviceListModel
     private let client: APIClient
+    private let notifications: NotificationCoordinator?
 
-    public init(client: APIClient) {
+    public init(client: APIClient, notifications: NotificationCoordinator? = nil) {
         self.client = client
+        self.notifications = notifications
         _model = State(initialValue: DeviceListModel(client: client))
     }
 
     /// The seam the tests render through: a model already in the state under
     /// test, rather than one that has to reach a server to get there.
-    public init(model: DeviceListModel, client: APIClient) {
+    public init(model: DeviceListModel, client: APIClient, notifications: NotificationCoordinator? = nil) {
         self.client = client
+        self.notifications = notifications
         _model = State(initialValue: model)
     }
 
@@ -36,7 +39,7 @@ public struct DeviceListView: View {
         }
         .navigationTitle(Copy.deviceListTitle)
         .navigationDestination(for: String.self) { deviceId in
-            DeviceDetailView(deviceId: deviceId, client: client)
+            DeviceDetailView(deviceId: deviceId, client: client, notifications: notifications)
         }
         .task { await model.load() }
     }
