@@ -92,6 +92,33 @@ export type ServerConfig = z.infer<typeof envSchema>;
 /** Reported by /healthz when nothing told the process which commit it is. */
 export const UNIDENTIFIED_REVISION = "unidentified";
 
+/**
+ * The variables this server refuses to start without under
+ * `NODE_ENV=production`, each with the message it fails with.
+ *
+ * Every other entry in the schema above has a default, so "required" here
+ * means something narrower and more useful than "declared": these are the
+ * values a deployment has to supply because the process cannot invent them.
+ * The check below is driven by this object rather than by a hand-written `if`
+ * per variable, which is what makes the list mean anything — a variable added
+ * here starts being enforced, and one removed stops.
+ *
+ * It is exported because something outside this process has to satisfy it, and
+ * until now every one of those places restated the requirement in its own
+ * words: infra/server.Dockerfile, infra/compose.yaml, infra/verify-image.sh and
+ * the CDK task definition each named `BUILD_REVISION` independently. That is
+ * one list written five times, and a sixth required variable would be enforced
+ * at startup and wired nowhere — the container would fail to start in whatever
+ * environment noticed first. infra/cdk reads this object and asserts the
+ * synthesized task definition supplies every key in it, so the wiring fails a
+ * test here instead of a deployment there.
+ */
+export const REQUIRED_PRODUCTION_ENV = {
+  BUILD_REVISION:
+    "required when NODE_ENV=production; set it to the commit the build came from " +
+    "(infra/server.Dockerfile passes it as a build argument)",
+} as const satisfies Partial<Record<keyof ServerConfig, string>>;
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   const parsed = envSchema.safeParse(env);
   if (!parsed.success) {
@@ -101,11 +128,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     throw new Error(`Invalid server environment — ${issues}`);
   }
   const config = parsed.data;
-  if (config.NODE_ENV === "production" && config.BUILD_REVISION === undefined) {
-    throw new Error(
-      "Invalid server environment — BUILD_REVISION: required when NODE_ENV=production; " +
-        "set it to the commit the build came from (infra/server.Dockerfile passes it as a build argument)",
-    );
+  // Checked here rather than in the schema because each is a relation between
+  // two variables — this one and NODE_ENV — rather than a property of one.
+  if (config.NODE_ENV === "production") {
+    for (const [name, reason] of Object.entries(REQUIRED_PRODUCTION_ENV)) {
+      if (config[name as keyof ServerConfig] === undefined) {
+        throw new Error(`Invalid server environment — ${name}: ${reason}`);
+      }
+    }
   }
   return config;
 }

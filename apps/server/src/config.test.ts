@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { loadConfig } from "./config";
+import { loadConfig, REQUIRED_PRODUCTION_ENV } from "./config";
 
 describe("loadConfig", () => {
   it("applies defaults when the environment is empty", () => {
@@ -45,6 +45,35 @@ describe("loadConfig", () => {
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://collector.example:4318/v1/traces",
       OTEL_SERVICE_NAME: "maekbeat-server-eu",
       BUILD_REVISION: "0123abc",
+    });
+  });
+
+  describe("REQUIRED_PRODUCTION_ENV", () => {
+    // The list is exported so infra/cdk can assert the task definition
+    // supplies every entry (apps/server/package.json `exports`). That is only
+    // worth anything if the list is the same one the server enforces, so this
+    // iterates the object rather than naming its current single member: a key
+    // added to it and not enforced fails here, and a key enforced by a
+    // hand-written `if` outside it is a key the deployment never hears about.
+    it("is exactly what loadConfig refuses to start without in production", () => {
+      for (const [name, reason] of Object.entries(REQUIRED_PRODUCTION_ENV)) {
+        expect(() => loadConfig({ NODE_ENV: "production" })).toThrow(new RegExp(name));
+        // The reason travels with the name, because "BUILD_REVISION: required"
+        // tells an operator staring at a crash-looping container nothing they
+        // did not already know.
+        expect(() => loadConfig({ NODE_ENV: "production" })).toThrow(
+          reason.slice(0, 40).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+        );
+      }
+    });
+
+    it("is not enforced outside production", () => {
+      // Positive control. Without it the test above passes on a loadConfig
+      // that rejects every environment, required list or not.
+      for (const name of Object.keys(REQUIRED_PRODUCTION_ENV)) {
+        expect(loadConfig({ NODE_ENV: "test" })).not.toHaveProperty(name);
+      }
+      expect(() => loadConfig({ NODE_ENV: "test" })).not.toThrow();
     });
   });
 

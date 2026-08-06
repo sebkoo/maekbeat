@@ -5,6 +5,12 @@
   "type": "module",
   "description": "Maekbeat API server: WebSocket vitals ingest, per-device ring-buffer store, REST reads, OpenAPI",
   "license": "Apache-2.0",
+  "//exports": "Not a public API. These three modules are read by infra/cdk so the deployment's environment contract, its load-balancer idle timeout and its health-check path are derived from the server rather than restated beside it; nothing else in the workspace imports this package.",
+  "exports": {
+    "./app": "./src/app.ts",
+    "./config": "./src/config.ts",
+    "./stream": "./src/stream.ts"
+  },
   "scripts": {
     "demo": "tsx scripts/demo.ts",
     "dev": "tsx watch src/main.ts",

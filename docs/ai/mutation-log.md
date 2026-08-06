@@ -1046,3 +1046,19 @@ routes into `sendAfterClose`, which increments nothing and emits nothing —
 checked against a real `ws` peer that ignores its close frame rather than
 reasoned about. The check was removed, on the C19 precedent that a guard nobody
 can construct a failure for is decoration.
+
+## C19 — one required-variable list instead of five
+
+| Guard                                           | Mutation                                                                           | Result |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------- | ------ |
+| the exported list is the enforced list          | enforce `BUILD_REVISION` with a hand-written `if` and add a second key to the list | caught |
+| the requirement is about production, not always | (positive control — the `NODE_ENV=test` case, unmutated)                           | n/a    |
+
+`REQUIRED_PRODUCTION_ENV` is exported so infra/cdk can assert that the
+synthesized task definition supplies every entry. An exported list that the
+server does not itself consult would be a second copy with a public name — the
+worst of the two, because it looks authoritative. So `loadConfig` is driven by
+the object, and the mutation that proves it is the shape the code was in
+before: the requirement enforced by a hand-written branch, with the list beside
+it drifting one key ahead. The test iterates the object rather than naming
+`BUILD_REVISION`, which is what makes it fail on the key nobody wired.
