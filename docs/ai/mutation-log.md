@@ -1062,3 +1062,54 @@ the object, and the mutation that proves it is the shape the code was in
 before: the requirement enforced by a hand-written branch, with the list beside
 it drifting one key ahead. The test iterates the object rather than naming
 `BUILD_REVISION`, which is what makes it fail on the key nobody wired.
+
+## C19 — the CDK stack, and what a template cannot be trusted to say
+
+| Guard                                     | Mutation                                                          | Result |
+| ----------------------------------------- | ----------------------------------------------------------------- | ------ |
+| the required-env contract                 | drop `BUILD_REVISION` from the task definition                    | caught |
+| websocket survival                        | set the ALB idle timeout to 10 s, below the 25 s heartbeat        | caught |
+| the health check path                     | point the target group at `/health`                               | caught |
+| the dashboard origin                      | set `CORS_ORIGIN` to a literal domain instead of the distribution | caught |
+| the image's source                        | pull from another account's ECR registry at the same tag          | caught |
+| the OTLP implication                      | configure an endpoint with nothing in the task listening on 4318  | caught |
+| no resource without a counterpart         | add an SQS queue no code in this repository reads                 | caught |
+| a suppression reason that says something  | replace one with "By design."                                     | caught |
+| the entry point wires the rule pack       | stop registering `AwsSolutionsChecks` in src/main.ts              | caught |
+| one task, because the state is in process | raise `desiredCount` to 2                                         | caught |
+| one task, transitively                    | make the deploy a rolling replacement (100/200 instead of 0/100)  | caught |
+
+The five the brief named are the first five, and each fails only its own target:
+changing the health-check path, the origin or the image repository leaves the
+other fourteen property assertions green. Dropping `BUILD_REVISION` fails three,
+which is the required-env test doing its job plus two tests that legitimately
+read the same variable. The snapshot fails on all eleven by construction, which
+is what a snapshot is for and is why it is not the proof of any of them.
+
+**The two findings were both composition failures, and neither is visible from
+either side alone.**
+
+The first is why a `fix(server)` commit precedes this one. An ALB closes a
+connection carrying no bytes after 60 seconds; a dashboard watching a device
+that has stopped sending is exactly that connection; apps/server had no
+keepalive. Both halves individually correct, and the symptom — a socket that
+dies on a timer and is rebuilt by the client's reconnect on the next one — reads
+as a flaky network rather than as a missing ping, because apps/web's REST
+back-fill hides the gap it leaves.
+
+The second was in the first draft of this stack, which ran `desiredCount: 2`
+because two is what a service behind a load balancer normally runs. apps/server
+keeps the frame ring, the alert engine, the decision log and the fan-out
+registry in process and shares none of them, so the second task is not capacity:
+a device's frames exist only on the task its ingest socket landed on, a
+dashboard that lands on the other subscribes to silence forever, and its REST
+reads alternate between a full history and an empty one. **Nothing in the
+template would have looked wrong.** The count is now 1, the deploy stops before
+it starts so a rolling replacement cannot do transiently what the count forbids,
+and both are asserted with the reason attached.
+
+One guard was written and deleted before commit, on the C19 precedent. The
+`instanceof AwsSolutionsChecks` check on the registered rule pack fails against
+the correct object — CDK stores validation plugins across a jsii boundary and
+hands back a structural proxy — so it was replaced with a match on the pack's
+own `name`, read off a fresh instance rather than typed as a string.

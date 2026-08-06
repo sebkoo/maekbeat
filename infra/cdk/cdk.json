@@ -1,0 +1,9 @@
+{
+  "app": "tsx src/main.ts",
+  "watch": { "exclude": ["**/*.test.ts", "cdk.out/**"] },
+  "context": {
+    "@aws-cdk/core:checkSecretUsage": true,
+    "@aws-cdk/aws-ecs:disableEcsImdsBlocking": false,
+    "@aws-cdk/core:target-partitions": ["aws"]
+  }
+}

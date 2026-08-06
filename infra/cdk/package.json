@@ -1,0 +1,28 @@
+{
+  "name": "@maekbeat/infra-cdk",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AWS CDK app for Maekbeat: the compose stack's counterpart, synthesized and asserted — never deployed",
+  "license": "Apache-2.0",
+  "scripts": {
+    "synth": "cdk synth --quiet",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@maekbeat/server": "workspace:*",
+    "aws-cdk-lib": "^2.263.0",
+    "cdk-nag": "^3.0.2",
+    "constructs": "^10.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@vitest/coverage-v8": "^4.1.10",
+    "aws-cdk": "^2.1135.0",
+    "tsx": "^4.19.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,8 +1,8 @@
-# packages/* is live (protocol — C1, vitals-sim — C2) and apps/server joined at C5; infra is a future glob.
+# packages/* is live (protocol — C1, vitals-sim — C2) and apps/server joined at C5; infra/cdk joined at C19.
 packages:
   - apps/*
   - packages/*
-  - infra
+  - infra/*
 # esbuild's postinstall only links its platform binary; required by tsx (apps/server dev runner).
 allowBuilds:
   esbuild: true

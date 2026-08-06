@@ -141,7 +141,7 @@ jobs:
           (github.actor != 'dependabot[bot]' &&
           github.event.pull_request.head.repo.full_name == github.repository)
         with:
-          files: apps/server/coverage/lcov.info,apps/web/coverage/lcov.info,packages/protocol/coverage/lcov.info,packages/vitals-sim/coverage/lcov.info
+          files: apps/server/coverage/lcov.info,apps/web/coverage/lcov.info,infra/cdk/coverage/lcov.info,packages/protocol/coverage/lcov.info,packages/vitals-sim/coverage/lcov.info
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
 

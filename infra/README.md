@@ -211,10 +211,15 @@ bite — `ACK_P95_MS=0` makes k6 exit 99 with the threshold marked failed.
 
 ## Not here yet
 
-No image is published to any registry, no CI job builds one, and no CDK stack
-exists — all of that is the rest of the C19 row in
-[docs/ROADMAP.md](../docs/ROADMAP.md). Every proof above has been run locally
-and none has run in CI.
+No image is published to any registry and no CI job builds one — that is the
+rest of the C19 row in [docs/ROADMAP.md](../docs/ROADMAP.md), along with
+dashboards-as-code. Every proof above has been run locally and none has run in
+CI.
+
+The AWS stack now exists as code in [cdk/](cdk): `cdk synth` produces a
+CloudFormation template and a suite asserts against it with no credentials.
+It has never been applied to an account. What it corresponds to, resource by
+resource, and what it deliberately leaves out are in [cdk/README.md](cdk/README.md).
 
 The load numbers do not cover the whole of either latency budget in
 [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md), and the budgets keep the word

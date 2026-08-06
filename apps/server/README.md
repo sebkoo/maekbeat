@@ -18,7 +18,7 @@ pnpm --filter @maekbeat/server typecheck
 
 One JSON-encoded vitals frame per message, validated with `vitalsFrameSchema`; there is no batching. Every message gets a JSON reply from [src/ingest.ts](src/ingest.ts): `{type: "ack", deviceId, seq, sessionEpoch, receivedAtMs, newSession}` on accept, or `{type: "rejected", reason: "invalid_json" | "invalid_frame" | "duplicate", ...}` on drop. A reject never closes the socket — one bad frame must not sever a stream carrying good ones.
 
-Declared limits, honestly: max message size is 16 KiB (`INGEST_MAX_PAYLOAD_BYTES`) — the one transport-level exception, closing the connection with code 1009 — and plain HTTP requests to `/ingest` get 426. Ingest is unauthenticated and the device map grows with every distinct `deviceId`, so `RING_CAPACITY` bounds memory per device, not per process. No throughput numbers are claimed anywhere; those arrive with the C19 k6 profile.
+Declared limits, honestly: max message size is 16 KiB (`INGEST_MAX_PAYLOAD_BYTES`) — the one transport-level exception, closing the connection with code 1009 — and plain HTTP requests to `/ingest` get 426. Ingest is unauthenticated and the device map grows with every distinct `deviceId`, so `RING_CAPACITY` bounds memory per device, not per process. Throughput and latency numbers are measured on one laptop and labelled with it ([infra/README.md](../../infra/README.md), C19); none of them is a capacity claim.
 
 Browser reads are cross-origin in every setup this repo documents, since the dashboard runs on another port, so the API sends CORS headers — permissively by default because it is unauthenticated and holds only synthetic data, and `CORS_ORIGIN` narrows that to an allowlist. That was missing until C12 and no suite caught it, because every test used a mocked fetch and none crossed an origin. Capturing the demo GIF through a real browser did.
 
@@ -52,7 +52,7 @@ When every retained alert is undecided the bound still wins and the oldest goes 
 
 ## Dashboard fan-out — `GET /devices/:deviceId/stream` (since C11)
 
-The push leg of [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) stage 7, in its dev form: an in-process publisher keyed by `deviceId` ([src/stream.ts](src/stream.ts)), with the Lambda fan-out still the target form at C19. Server to dashboard only — a subscriber that sends anything is ignored, because frames enter this system through `/ingest` and nowhere else.
+The push leg of [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) stage 7, in its dev form: an in-process publisher keyed by `deviceId` ([src/stream.ts](src/stream.ts)), with a Lambda fan-out named as the target form in docs/ARCHITECTURE.md and no commit assigned — infra/cdk omits it, because there is no handler to point at. Server to dashboard only — a subscriber that sends anything is ignored, because frames enter this system through `/ingest` and nowhere else.
 
 On subscribe the socket sends `{type:"ready", deviceId, serverTimeMs, ringCapacity}`, then one `{type:"frame", frame}` per accepted frame and one `{type:"alert", alert}` per lifecycle transition, both shaped by `streamMessageSchema` in [@maekbeat/protocol](../../packages/protocol). Publishing happens after the engine has judged the frame, so a dashboard never sees an alert before the frame that raised it, and deduped frames never reach it at all.
 
