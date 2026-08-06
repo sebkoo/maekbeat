@@ -36,11 +36,19 @@ services:
     environment:
       # The image already sets NODE_ENV, HOST, PORT and BUILD_REVISION; what is
       # here is what a deployment decides rather than what the image is.
-      LOG_LEVEL: info
+      - LOG_LEVEL=info
       # The dashboard's two host origins, spelled out. `*` would work and would
       # make the C13 origin assertion unfalsifiable — the allowlist is only a
       # guard if removing an entry breaks something (docs/DECISIONS.md #21).
-      CORS_ORIGIN: http://127.0.0.1:8080,http://localhost:8080
+      - CORS_ORIGIN=http://127.0.0.1:8080,http://localhost:8080
+      # Passed through from the shell, and absent from the container when it is
+      # absent from the shell — which is why this list is a list. Written as
+      # `KEY: ${VAR:-}` it would reach the server as an empty string, and the
+      # environment contract rejects that with a startup error rather than
+      # reading it as "off" (apps/server/src/config.ts). infra/load.sh sets it
+      # for the traced half of the tracing-cost measurement and leaves it unset
+      # for the other half.
+      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
     ports:
       # Loopback only. This server authenticates nobody (SECURITY.md), so it
       # has no business being reachable from the network the laptop is on.
@@ -68,4 +76,85 @@ services:
         # The dashboard's first paint reads /devices. Starting it before the
         # API answers would make the stack's first thirty seconds look like the
         # failure state the C13 suite has a test for.
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # The load rig. Behind a profile, so `docker compose up` still starts exactly
+  # the two services the stack is: `docker compose --profile load ...` is the
+  # only way to reach anything below, and infra/load.sh is what drives it.
+  #
+  # This is also the first service-to-service traffic in the file, and it is not
+  # a reversal of docs/DECISIONS.md #21. That decision is about the browser's
+  # path to the API — no proxy, two origins, the crossing left observable. A
+  # load generator is not a browser, and pushing it through the host's published
+  # port would measure the port forward as well as the server.
+  # ---------------------------------------------------------------------------
+  k6:
+    profiles: ["load"]
+    build:
+      context: ..
+      dockerfile: infra/k6.Dockerfile
+    image: maekbeat-k6:compose
+    environment:
+      - API_URL=ws://server:3000
+      - RUN_MS
+      - RATE_HZ
+      - VUS
+      - DEVICES
+      - DEVICES_PER_VU
+      - BREACH
+      - ACK_P95_MS
+      - FANOUT_P95_MS
+    depends_on:
+      server:
+        condition: service_healthy
+
+  # A collector that accepts every OTLP export and keeps nothing. The tracing
+  # cost being measured is the server's — serialising spans, batching them and
+  # posting them — and a real backend would add its own latency to a number
+  # that is supposed to be about this server.
+  collector:
+    profiles: ["load"]
+    image: node:22.22.0-alpine3.22
+    command:
+      - node
+      - -e
+      - |
+        require("http")
+          .createServer((req, res) => {
+            req.resume();
+            req.on("end", () => {
+              res.writeHead(200, { "content-type": "application/json" });
+              res.end("{}");
+            });
+          })
+          .listen(4318, "0.0.0.0");
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('net').connect(4318,'127.0.0.1').on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 5
+
+  # The subscriber that stops reading, on the compose network. It cannot be run
+  # from the host: a published port is a proxy that drains the server's socket
+  # for you, so a host-side stalled client produces no backpressure at all
+  # (infra/stalled.Dockerfile records the measurement).
+  stalled:
+    profiles: ["load"]
+    build:
+      context: ..
+      dockerfile: infra/stalled.Dockerfile
+    image: maekbeat-stalled:compose
+    # Fixed arguments rather than a `run` invocation: `docker compose run -d`
+    # does not hand back a usable container id, and reading this peer's log is
+    # how the comparison knows it ever attached.
+    command: ["server", "3000", "k6-fanout-0"]
+    depends_on:
+      server:
         condition: service_healthy

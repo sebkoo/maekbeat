@@ -17,20 +17,26 @@ no Xcode. `BUILD_REVISION` has no default and the build stops without it
 
 ## What is here
 
-| File                                   | What it is                                                                          |
-| -------------------------------------- | ----------------------------------------------------------------------------------- |
-| [server.Dockerfile](server.Dockerfile) | The API server image: pnpm deploy of production dependencies, non-root, healthcheck |
-| [web.Dockerfile](web.Dockerfile)       | The dashboard bundle behind unprivileged nginx — for the smoke, not for deployment  |
-| [nginx.conf](nginx.conf)               | Static serving, SPA fallback, and no proxy of any kind                              |
-| [compose.yaml](compose.yaml)           | The two services, their ports, and the CORS allowlist that names the web origin     |
-| [verify-image.sh](verify-image.sh)     | Image proofs: non-root, red healthcheck, fast config failure, no debris, amd64      |
-| [compose-smoke.sh](compose-smoke.sh)   | Stack proofs: build identity, golden replay, the C13 smoke, graceful stop           |
-| [replay-golden.mjs](replay-golden.mjs) | Streams `anomaly.ndjson` into the container and asserts the alert and the fan-out   |
-| [rude-peer.mjs](rude-peer.mjs)         | A WebSocket client that never answers a close frame                                 |
+| File                                             | What it is                                                                          |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| [server.Dockerfile](server.Dockerfile)           | The API server image: pnpm deploy of production dependencies, non-root, healthcheck |
+| [web.Dockerfile](web.Dockerfile)                 | The dashboard bundle behind unprivileged nginx — for the smoke, not for deployment  |
+| [nginx.conf](nginx.conf)                         | Static serving, SPA fallback, and no proxy of any kind                              |
+| [compose.yaml](compose.yaml)                     | The two services, their ports, and the CORS allowlist that names the web origin     |
+| [verify-image.sh](verify-image.sh)               | Image proofs: non-root, red healthcheck, fast config failure, no debris, amd64      |
+| [compose-smoke.sh](compose-smoke.sh)             | Stack proofs: build identity, golden replay, the C13 smoke, graceful stop           |
+| [replay-golden.mjs](replay-golden.mjs)           | Streams `anomaly.ndjson` into the container and asserts the alert and the fan-out   |
+| [rude-peer.mjs](rude-peer.mjs)                   | A WebSocket client that never answers a close frame                                 |
+| [stalled-subscriber.mjs](stalled-subscriber.mjs) | A fan-out subscriber that attaches and then stops reading                           |
+| [k6.Dockerfile](k6.Dockerfile)                   | The load generator as an image, so no k6 install is needed                          |
+| [stalled.Dockerfile](stalled.Dockerfile)         | The stalled subscriber on the compose network, where it can create backpressure     |
+| [k6/](k6)                                        | The two load profiles: ingest throughput, fan-out delivery latency                  |
+| [load.sh](load.sh)                               | Runs the matrix and prints the numbers with the environment beside them             |
 
 ```sh
 infra/verify-image.sh     # builds for both architectures, then asserts
 infra/compose-smoke.sh    # brings the stack up, runs every stack proof, tears it down
+infra/load.sh             # k6 on the compose network; reports, never gates
 ```
 
 ## Why there is no reverse proxy
@@ -130,9 +136,89 @@ disk holds (`docker image ls`), layer content is roughly what a pull transfers
 (`docker image inspect .Size`). Reporting one of them as "the size" would be
 choosing whichever number reads better.
 
+## Load
+
+```sh
+infra/load.sh                 # the whole matrix
+RUN_MS=5000 infra/load.sh     # a faster, noisier pass
+```
+
+k6 runs as a container on the compose network ([k6.Dockerfile](k6.Dockerfile),
+scripts in [k6/](k6)), not as a host install, for the same reason the images
+exist: anyone who clones this gets the load rig with no extra tooling. It does
+not gate CI and it is not a capacity claim; the reason is recorded as
+[docs/DECISIONS.md](../docs/DECISIONS.md) #24, and the deterministic half that
+does gate CI is apps/server/src/load.test.ts and
+apps/server/src/fanout-bound.test.ts.
+
+**These numbers describe this laptop under this runtime. They are not the
+system's capacity, nothing here extrapolates, and no number below says how many
+devices this supports.**
+
+Measured 2026-08-06 on an Apple M3 Pro (Mac15,7) running macOS 26.6, under
+Colima with 4 CPUs and 7.7 GiB inside the VM — Docker server 29.5.2, k6 1.4.0,
+arm64 images built for the host rather than the deploy target. Fifteen seconds
+per run, one run each. Differences under about 1 ms are noise at this sample
+size and are reported as such rather than rounded into a result.
+
+| Profile                                    | Acked frames/s | Ack p95 | Fan-out delivery p95 | Server memory peak |
+| ------------------------------------------ | -------------- | ------- | -------------------- | ------------------ |
+| ingest, 16 devices over 8 sockets at 50 Hz | 742.0          | 6 ms    | —                    | 99 MiB             |
+| fan-out, 8 devices at 50 Hz                | —              | —       | 1 ms (avg 377 µs)    | 87 MiB             |
+| ingest, same profile, OTLP export on       | 743.6          | 7 ms    | —                    | 106 MiB            |
+| fan-out, same profile, OTLP export on      | —              | —       | 1 ms (avg 370 µs)    | 108 MiB            |
+| fan-out, with one stalled subscriber       | —              | —       | 1 ms (avg 387 µs)    | 96 MiB             |
+| ingest, 32 devices at 12.5 Hz (~400/s)     | 385.7          | 7 ms    | —                    | 102 MiB            |
+| ingest, 8 devices at 50 Hz (~400/s)        | 365.2          | 4 ms    | —                    | 102 MiB            |
+
+**What OTLP export costs.** Nothing measurable in throughput (742.0 against
+743.6 frames/s, which is noise) and nothing measurable in fan-out delivery.
+What it costs is memory: about 7 MiB, consistently, for the batch queue and the
+exporter. Ack p95 moves 6 ms to 7 ms, which is one bucket at this resolution
+and is not a result. C18 proved tracing does not change what an alert says;
+this says it does not change what an alert costs either, on this machine.
+
+**What a stalled subscriber costs the healthy ones.** Not latency: delivery p95
+is unchanged at 1 ms and throughput is unchanged, with a subscriber attached to
+`k6-fanout-0` that reads nothing for the whole run. What it costs is memory —
+peak 96 MiB against the 87 MiB baseline — and that is the growth
+`STREAM_MAX_BUFFERED_BYTES` caps.
+
+**Where the bound actually lands, which is not where the arithmetic says.**
+256 KiB at 211 bytes a message is about 1240 frames, and a stalled subscriber
+sails past that: its own kernel receive buffer holds several megabytes before
+the server's write queue grows at all. Driving one device hard, the drop fires
+after roughly 36 000 frames — `bufferedBytes: 262182, limit: 262144` in the
+server log, 38 bytes over. So the bound protects against a subscriber that
+stays behind, not against a brief stall, and `bufferedAmount` is the server's
+own queue with the operating system's buffers in front of it. The drop itself
+is pinned in apps/server/src/fanout-bound.test.ts, which can control both ends.
+
+**Device count or frame rate.** At the same total throughput and the same eight
+sockets, 32 devices at 12.5 Hz gives ack p95 7 ms and 8 devices at 50 Hz gives
+4 ms. So the cost tracks device count rather than frame rate: each device
+carries its own ring buffer, dedupe set and per-rule alert windows, and a frame
+arriving on a device the server already has open is cheaper than the first
+frame of a new one. Holding the socket count equal across the two runs is what
+makes this readable — a first version varied it and the gap could have been
+either cause.
+
+The k6 thresholds (`ack_latency_ms p(95)<1000`, `frames_rejected count==0`,
+`fanout_delivery_ms p(95)<1000`) are a smoke signal set far under the measured
+floor, not a capacity gate: a run that cannot acknowledge a frame inside a
+second, or that rejects one at all, is broken in a way worth failing on. They
+bite — `ACK_P95_MS=0` makes k6 exit 99 with the threshold marked failed.
+
 ## Not here yet
 
 No image is published to any registry, no CI job builds one, and no CDK stack
 exists — all of that is the rest of the C19 row in
 [docs/ROADMAP.md](../docs/ROADMAP.md). Every proof above has been run locally
 and none has run in CI.
+
+The load numbers do not cover the whole of either latency budget in
+[docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md), and the budgets keep the word
+"target" until they do. What is measured is the server's leg — ingest stamp to
+fan-out delivery. Frame capture to dashboard paint additionally spans a device,
+a phone and a browser render, and notification dispatch has no span in this
+server at all.

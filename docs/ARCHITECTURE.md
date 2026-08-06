@@ -97,7 +97,9 @@ The host that builds is arm64 and the deploy target is x86-64. `docker build` on
 | frame capture → dashboard paint       | under 2 s | k6 drives vitals-sim frames over WS while OpenTelemetry spans (wired at C18) time ingest → queue → fan-out, and the dashboard logs receipt − `capturedAtMs`. |
 | anomaly frame → notification dispatch | under 5 s | the same k6 run traces the anomaly frame's ingest span through to the notification-dispatch span, one trace per alert.                                       |
 
-Neither number has been measured; both are budget targets per [ROADMAP.md](ROADMAP.md), and measured values replace them at C19. Scale (device concurrency) carries no number at all until the C19 k6 profile defines and measures one.
+Both keep the word "target", and C19's measurements are the reason they can now say precisely why. The load rig measures the server's leg of the first path — ingest stamp to fan-out delivery, 1 ms at p95 on the machine named in [infra/README.md](../infra/README.md) — and neither end of it: frame capture to dashboard paint additionally spans a device, a phone and a browser render, and the notification-dispatch span of the second path does not exist in this server. A budget is not measured until the whole path is, and reporting one leg as the number would be the more useful-looking of the two mistakes available here.
+
+The load rig itself is a compose service rather than a host tool: `infra/load.sh` runs grafana/k6 on the compose network ([infra/k6.Dockerfile](../infra/k6.Dockerfile), profiles in infra/k6/), so a clone gets it without installing k6. It reports and never gates, and the reason is [docs/DECISIONS.md](DECISIONS.md) #24 — a shared runner's numbers are not comparable run to run, so a CI load gate is a flake generator in a performance costume. What does gate CI is the deterministic half: apps/server/src/load.test.ts and apps/server/src/fanout-bound.test.ts. Scale (device concurrency) still carries no number, because nothing here has measured one honestly; what is measured is that the ingest path's cost tracks device count rather than frame rate at equal throughput.
 
 ## Failure modes
 
