@@ -983,3 +983,24 @@ package.json already having been copied, which was true and unstated; it
 happened lazily inside the install step; and no build log named the version.
 Resolving it explicitly in its own layer makes the ordering a requirement,
 gives the download its own cache entry, and prints the number.
+
+## C19 — the guard that was already red
+
+| Guard                                 | Mutation                                      | Result |
+| ------------------------------------- | --------------------------------------------- | ------ |
+| every non-Node directory names a gate | add `infra/k6/orphan.js`, wired to nothing    | caught |
+| every non-Node directory names a gate | stop `infra/load.sh` from running `fanout.js` | caught |
+| the catch-all still fails an unknown  | add `infra/newthing/` with no package.json    | caught |
+
+The mutation that mattered was not applied by this session. The k6 commit added
+`infra/k6/` — a directory under `infra/` with no `package.json` — and the C9
+guard's catch-all arm fails exactly that by design. The hygiene job has been red
+on `main` since it landed, unobserved, because GitHub Actions has been in outage
+for the whole of that time. **A guard that has never been executed is a guard
+with an unknown result, not a passing one**, and the only reason this was found
+is that the CDK work added a second directory the same arm would have to judge.
+
+The arm added for it does not claim a coverage number the load rig does not
+produce (docs/DECISIONS.md #24). It asserts reachability instead: every `.js` in
+`infra/k6/` must be invoked by `infra/load.sh`, anchored to the `run_k6 <name>
+<file>` call so that a mention in a comment does not satisfy it.

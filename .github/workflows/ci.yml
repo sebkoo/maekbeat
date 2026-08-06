@@ -87,6 +87,26 @@ jobs:
                   exit 1
                 }
                 ;;
+              infra/k6)
+                # The k6 profiles are the one directory here whose answer to
+                # "which gate covers it" is "none, deliberately" — they run
+                # under a load generator that reports and gates nothing
+                # (docs/DECISIONS.md #24), so there is no coverage number to
+                # ratchet and inventing one would be a G3 event.
+                #
+                # What is checked instead is that they are not dead code: every
+                # .js file in the directory must be invoked by infra/load.sh,
+                # which is the only documented way to run them. A profile added
+                # and never wired fails here, and so does a runner that stops
+                # calling one. Anchored to `run_k6 <name> <file>` rather than to
+                # the bare filename, so a mention in a comment does not pass.
+                for profile in infra/k6/*.js; do
+                  grep -qE "^run_k6 [a-z0-9-]+ $(basename "$profile") " infra/load.sh || {
+                    echo "infra/load.sh never runs $profile"
+                    exit 1
+                  }
+                done
+                ;;
               *)
                 echo "$dir is neither a pnpm package nor a directory this guard"
                 echo "knows how to gate. Add its gate, then name it here."
