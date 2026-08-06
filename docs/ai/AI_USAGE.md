@@ -47,7 +47,11 @@ That discipline is not sufficient on its own, and C12 is the evidence. Its own a
 
 AI use is disclosed here, at the project level, so git history stays free of tool-injected attribution trailers. Enforcement is layered: .claude/settings.json is the best-effort layer, and .githooks/commit-msg plus the CI hygiene job are the tool-agnostic real enforcement.
 
-Blocked patterns, matched case-insensitively: co-authored-by, claude-session, noreply@anthropic, generated with claude.
+Blocked patterns, matched case-insensitively: a `co-authored-by:` line that also names claude or anthropic, claude-session, noreply@anthropic, generated with claude.
+
+The rule bans AI attribution, not co-authorship, and the distinction is load-bearing rather than pedantic. An accurate `Co-authored-by:` line — a human collaborator, or Dependabot's squash-merge trailer — is a true statement about who wrote the change, and a guard that rejects it is asking for authorship to be falsified. The pattern used to open with a bare `co-authored-by:` term and did exactly that; see the landmine entry in [mutation-log.md](mutation-log.md).
+
+Adding another AI tool means adding its trailer form to the pattern. It does not mean widening the co-author term back.
 
 ## Human review
 

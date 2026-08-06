@@ -1,13 +1,24 @@
 #!/usr/bin/env bash
 # Guardrail G1: reject commit messages that carry AI-attribution trailers.
+#
+# The pattern bans AI attribution, not co-authorship. A bare `co-authored-by:`
+# term used to be the first alternative, and it was wrong: GitHub's squash merge
+# writes an accurate `Co-authored-by: dependabot[bot] <...>` line, so the guard
+# rejected a true statement about who wrote the change. Deleting that trailer to
+# satisfy the hook would falsify authorship, which is the opposite of what G1
+# protects. The co-author term now requires an AI name on the same line.
+#
+# This pattern is duplicated in scripts/check-commit-hygiene.sh and the two are
+# asserted byte-identical by scripts/test-githooks.sh.
 # Guardrail G2: enforce Conventional Commit subject form, <=72 characters.
 # Receives the commit message file path as $1 (standard commit-msg contract).
 set -u
 
 msg_file="$1"
 
-if grep -qiE 'co-authored-by:|claude-session|noreply@anthropic|generated with claude' "$msg_file"; then
-  echo "commit-msg: banned AI-attribution trailer found (matches: co-authored-by:|claude-session|noreply@anthropic|generated with claude)." >&2
+if grep -qiE 'co-authored-by:.*(claude|anthropic)|claude-session|noreply@anthropic|generated with claude' "$msg_file"; then
+  echo "commit-msg: banned AI-attribution trailer found (matches: co-authored-by:.*(claude|anthropic)|claude-session|noreply@anthropic|generated with claude)." >&2
+  echo "A co-author line naming a real contributor, human or bot, is fine." >&2
   echo "AI disclosure lives in docs/ai/AI_USAGE.md, not in git metadata." >&2
   exit 1
 fi

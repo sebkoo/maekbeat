@@ -284,3 +284,60 @@ so a pushed duplicate would already be sitting between them. An absence became a
 condition, and the only remaining grace period in the suite is the one in
 `acks.test.ts`, where a second fan-out of a single decision genuinely is an
 absence and no amount of polling can prove one.
+
+## The guard that rejected a true statement
+
+`main` went red because GitHub's squash merge writes an accurate trailer:
+
+```text
+Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
+```
+
+and G1's pattern opened with a bare `co-authored-by:` term. Two correct commits
+(822af19, 8f6c411) were rejected for stating who wrote them. The fix is the
+guard, not the commits — deleting a true co-author line to satisfy a check would
+falsify authorship, which is the opposite of what G1 exists to protect. The term
+now requires an AI name on the same line.
+
+| Guard                                 | Own mutation                               | Neighbour mutation                                | Result |
+| ------------------------------------- | ------------------------------------------ | ------------------------------------------------- | ------ |
+| the co-author term names an AI        | widen it back to bare `co-authored-by:`    | widen only the CI script, leaving the hook narrow | caught |
+| the same widening fails CI's history  | widen it in `check-commit-hygiene.sh` only | —                                                 | caught |
+| the AI co-author term is load-bearing | drop it from the pattern                   | —                                                 | caught |
+| the session-marker term               | drop `claude-session`                      | —                                                 | caught |
+| the anthropic-address term            | drop `noreply@anthropic`                   | —                                                 | caught |
+| the generated-with term               | drop `generated with claude`               | —                                                 | caught |
+| the two copies stay identical         | narrow one file and not the other          | —                                                 | caught |
+
+The matrix in `scripts/test-githooks.sh` grew six reject rows and three accept
+rows, and gained an assertion that the pattern is byte-identical in the hook and
+in the history scan — anchored to the executable lines, because both files now
+discuss the rule in prose and an unanchored match compares comments. That was
+itself a first-attempt failure: the check matched a backticked mention in a
+comment and reported a drift that did not exist.
+
+### The fourth landmine, and the first that was not caught first
+
+This is the fourth member of a family: a platform behaviour that turns a correct
+guard into a wrong one.
+
+| #   | Landmine                                                                                | Found                                        |
+| --- | --------------------------------------------------------------------------------------- | -------------------------------------------- |
+| 1   | merge commits have git-generated subjects, so Conventional Commits cannot apply to them | before it fired — C6 added `--no-merges`     |
+| 2   | GitHub withholds Actions secrets from fork pull requests                                | before it fired — C10 conditioned the upload |
+| 3   | Dependabot runs read a separate secret store                                            | before it fired — same commit                |
+| 4   | GitHub's squash merge adds a real `Co-authored-by:` trailer                             | **after it fired**                           |
+
+Three were anticipated by reading how the platform behaves before it had a
+chance to bite. This one was not, and it is worth being plain about why that
+matters more than the two commits it reddened: the same guard would have
+rejected **the first outside contributor's squash merge at C23**, on a
+repository that opens for contributions at C23, for the offence of recording who
+wrote the code. A contributor's first interaction would have been a red build
+blaming them for accurate authorship. The two Dependabot commits were the cheap
+version of that failure.
+
+The general shape, since three of the four are the same shape: a guard written
+against _what this project does_ meets _what the platform does on its behalf_.
+Merge subjects, secrets, and trailers are all written by GitHub, not by an
+author, and none of them were in view when the rule was drafted.

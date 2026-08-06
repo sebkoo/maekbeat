@@ -4,12 +4,26 @@ Rules for every AI session in this repo. They are not suggestions.
 
 ## G1 — No AI attribution in commit metadata, ever
 
-- No `Co-Authored-By`, no "Generated with Claude", no session trailers, in
-  any commit message, ever. AI disclosure lives in `docs/ai/AI_USAGE.md`.
+- No AI attribution trailer in any commit message, ever: no
+  `Co-authored-by:` line naming Claude or Anthropic, no "Generated with
+  Claude", no session markers. AI disclosure lives in `docs/ai/AI_USAGE.md`.
+- **Accurate attribution of real contributors is allowed and wanted.** A
+  `Co-authored-by:` line naming a human, or a bot that genuinely authored
+  the change such as Dependabot's squash-merge trailer, is a true statement
+  about who wrote the code, and deleting one to satisfy a guard would
+  falsify authorship — the opposite of what this rule protects.
 - Triple defense: `.claude/settings.json`, `.githooks/commit-msg` (active
   via `core.hooksPath`), and the CI hygiene job.
-- Banned regex (case-insensitive):
-  `co-authored-by:|claude-session|noreply@anthropic|generated with claude`
+- Banned regex (case-insensitive), byte-identical in `.githooks/commit-msg`
+  and `scripts/check-commit-hygiene.sh`, asserted by
+  `scripts/test-githooks.sh`:
+  `co-authored-by:.*(claude|anthropic)|claude-session|noreply@anthropic|generated with claude`
+- If another AI tool is ever used here, add its trailer form to the pattern.
+  Do not widen the co-author term back to all co-authorship — that is what
+  broke `main` once already.
+- The pattern matches itself, so a commit message that quotes it in full is
+  rejected. Describe the change and point here; do not reach for
+  `--no-verify`.
 - After committing, run `git log --format='%B'` and confirm zero matches.
   If a trailer appears, amend or rebase BEFORE pushing.
 

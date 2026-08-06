@@ -5,7 +5,11 @@
 # Exits 0 on a clean history, including a repo with zero commits (unborn branch).
 set -u
 
-trailer_pattern='co-authored-by:|claude-session|noreply@anthropic|generated with claude'
+# Bans AI attribution, not co-authorship: an accurate `Co-authored-by:` line
+# naming a real contributor (dependabot's squash-merge trailer, a human
+# collaborator) is allowed and wanted. Byte-identical to the pattern in
+# .githooks/commit-msg; scripts/test-githooks.sh asserts that.
+trailer_pattern='co-authored-by:.*(claude|anthropic)|claude-session|noreply@anthropic|generated with claude'
 subject_pattern='^(feat|fix|docs|test|chore|ci|refactor|perf|build)(\([a-z0-9-]+\))?!?: .+'
 
 status=0
@@ -14,8 +18,8 @@ status=0
 if { git log --format='%B' 2>/dev/null || true; } | grep -qiE "$trailer_pattern"; then
   echo "hygiene: banned AI-attribution trailer found in commit history." >&2
   echo "hygiene: offending commits:" >&2
-  for p in 'co-authored-by:' 'claude-session' 'noreply@anthropic' 'generated with claude'; do
-    git log --format='%H %s' -i --grep="$p" >&2 || true
+  for p in 'co-authored-by:.*(claude|anthropic)' 'claude-session' 'noreply@anthropic' 'generated with claude'; do
+    git log --format='%H %s' -i -E --grep="$p" >&2 || true
   done
   status=1
 fi
