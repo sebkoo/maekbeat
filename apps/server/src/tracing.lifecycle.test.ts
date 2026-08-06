@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { connect, type AddressInfo, type Socket } from "node:net";
 import { fileURLToPath } from "node:url";
 import { inspect } from "node:util";
 
@@ -188,6 +189,59 @@ async function sendFrames(port: number, count: number, keepOpen = false): Promis
 }
 
 /**
+ * Opens a WebSocket by hand and then stops co-operating.
+ *
+ * Written against `node:net` rather than with the `ws` client because `ws` is
+ * polite by construction: its receiver answers a close frame automatically, and
+ * there is no option that turns that off. A client that cannot be rude cannot
+ * test what happens when one is.
+ */
+async function attachRudePeer(
+  port: number,
+): Promise<{ socket: Socket; readonly destroyed: boolean }> {
+  const socket = connect(port, "127.0.0.1");
+  const state = { destroyed: false };
+  socket.on("close", () => (state.destroyed = true));
+
+  await new Promise<void>((resolve, reject) => {
+    socket.once("error", reject);
+    socket.once("connect", () => {
+      socket.write(
+        [
+          "GET /ingest HTTP/1.1",
+          `Host: 127.0.0.1:${port}`,
+          "Upgrade: websocket",
+          "Connection: Upgrade",
+          `Sec-WebSocket-Key: ${randomBytes(16).toString("base64")}`,
+          "Sec-WebSocket-Version: 13",
+          "",
+          "",
+        ].join("\r\n"),
+      );
+    });
+    socket.once("data", (chunk: Buffer) => {
+      const status = chunk.toString("latin1").split("\r\n")[0] ?? "";
+      // Read and discard everything after the upgrade, the close frame
+      // included. Pausing the socket instead would fill the server's send
+      // buffer and make this a backpressure test, which is a different fault.
+      if (status.startsWith("HTTP/1.1 101")) {
+        socket.on("data", () => {});
+        resolve();
+      } else {
+        reject(new Error(`handshake refused: ${status}`));
+      }
+    });
+  });
+
+  return {
+    socket,
+    get destroyed() {
+      return state.destroyed;
+    },
+  };
+}
+
+/**
  * SIGTERM, then wait for the process to end by itself.
  *
  * Nothing here sends SIGKILL. src/main.ts does not call `process.exit` on the
@@ -272,6 +326,32 @@ describe("tracing off by default", () => {
     const exit = await stopAndAwaitExit(server.child);
     expect(exit).toEqual({ code: 0, signal: null });
     ws.terminate();
+  }, 60_000);
+
+  it("exits on its own with a peer that never answers the close frame", async () => {
+    // The test above passes partly on the client's good manners: `ws` answers
+    // the server's close frame, so the connection ends because both sides
+    // agreed to end it. This one takes that away.
+    //
+    // The peer here speaks the opening handshake over a raw socket and then
+    // sends nothing else — no close frame, no FIN — which is what a phone that
+    // lost signal mid-episode looks like from the server. Without the sweep in
+    // shutdown(), `ws` waits thirty seconds before destroying it and this test
+    // fails on its timeout, exactly as a container fails with exit 137.
+    const server = await startServer({});
+    const peer = await attachRudePeer(server.port);
+    try {
+      const started = Date.now();
+      const exit = await stopAndAwaitExit(server.child);
+      expect(exit).toEqual({ code: 0, signal: null });
+      // Under the grace plus the flush, and nowhere near `ws`'s own 30 s
+      // close timeout — the number that would otherwise decide this.
+      expect(Date.now() - started).toBeLessThan(10_000);
+      // The server ended it, rather than the peer being outlived.
+      expect(peer.destroyed).toBe(true);
+    } finally {
+      peer.socket.destroy();
+    }
   }, 60_000);
 
   it("posts nothing to a reachable collector while switched off", async () => {

@@ -766,3 +766,31 @@ by walking each frame's subtree, and every numeric attribute on every span is
 compared by exact equality against what the replay derives for that span. The
 general form of the lesson: a gate written as a list of the cases you thought
 of is a gate with a hole the shape of the case you did not.
+
+## C19 — the shutdown residual C18 left
+
+C18 recorded a residual in `src/lifecycle.ts` and left it: `app.close()` asks
+@fastify/websocket to close its clients and does not destroy one that ignores
+the close frame. In a process that is a slow exit. Under an orchestrator it is
+SIGKILL after the stop grace period, which discards the span flush C18 shipped,
+the shutdown log line, and the exit code an operator reads.
+
+The container found it before any of these rows existed: `docker compose stop -t 10`
+with a raw peer attached killed the server at 11 s with exit 137, measured while
+building the C19 stack that lands next. The fix is a sweep armed alongside the
+close that terminates whoever is left after `PEER_CLOSE_GRACE_MS`.
+
+| Guard                                 | Mutation                                              | Result |
+| ------------------------------------- | ----------------------------------------------------- | ------ |
+| peers that ignore close are destroyed | delete `peer.terminate()` from the sweep body         | caught |
+| the grace is a real interval          | set the sweep delay to 0                              | caught |
+| polite peers keep their handshake     | terminate every peer unconditionally before the close | caught |
+| a failed close leaves no live timer   | drop `clearTimeout(sweep)` from the `finally`         | caught |
+
+The second row failed to catch its mutation on the first attempt, and the
+reason is the useful part. The polite-peer control originally had `close()`
+delete its peer immediately, which resolves on a microtask — so a sweep delay
+of 0 was cancelled before its timer could fire, and the test asserted only that
+`terminate` is not called synchronously. A close handshake is a round trip, so
+the control now takes 150 ms to leave, and the grace became a number the test
+can be wrong about.
