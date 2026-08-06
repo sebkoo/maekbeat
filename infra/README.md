@@ -58,6 +58,31 @@ word means. The alternative, bundling with esbuild, would produce a smaller
 image and a second build path to keep in agreement with the one every test
 uses.
 
+## The base image, and where the 305 MB goes
+
+The base is `node:22.22.0-alpine3.22`, named in the `NODE_IMAGE` build argument
+at the top of [server.Dockerfile](server.Dockerfile) and used for both the build
+stage and the runtime stage. Measured inside the built image, the arm64 server
+image's 301 MB breaks down as roughly 118 MB of Node binary, 60 MB of the
+server's production dependencies, and 19 MB of the npm the base ships and this
+image never invokes — its `CMD` is `tsx`. So image-size work here is base-image
+work, not dependency work.
+
+Two smaller bases were considered and neither is taken in this commit. Dropping
+the bundled npm from the runtime stage is a real 19 MB and is named here as an
+untaken measurement rather than applied, because it changes the artifact and
+this commit is about the build's package manager. A distroless Node image is
+the larger saving and costs more than it looks: three of the nine proofs in
+[verify-image.sh](verify-image.sh) run `docker run --entrypoint` with `sh`, `id`
+and `sleep`, none of which exist there, so the move trades image bytes for
+rewriting the checks that make the image trustworthy.
+
+What is not a reason: native modules. The deployed tree contains no `.node`
+addon at all, and esbuild — the one native binary in it, arriving under `tsx` —
+ships as a static Go executable per architecture rather than per libc. A libc
+change would not break this image, and saying otherwise would have been a
+plausible-sounding claim with nothing behind it.
+
 ## Why the build is amd64 and this machine is not
 
 The host here is arm64 and the deploy target is x86-64, which is the container

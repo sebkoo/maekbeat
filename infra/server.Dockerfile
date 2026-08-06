@@ -23,7 +23,6 @@ FROM ${NODE_IMAGE} AS build
 ENV PNPM_HOME=/pnpm
 ENV PATH=/pnpm:$PATH
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-RUN corepack enable
 
 WORKDIR /repo
 
@@ -36,6 +35,32 @@ COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/vitals-sim/package.json packages/vitals-sim/
+
+# The package manager, resolved from the repository's own `packageManager`
+# field before anything invokes it.
+#
+# What was actually wrong here, and what was not. The C19 review recorded this
+# as "the Dockerfile takes whatever pnpm the base image ships"; it does not,
+# and the check that would have proved it does not exist because it cannot.
+# `corepack enable` installs a shim that reads `packageManager` from the
+# nearest manifest at the moment pnpm runs, so the version was already pinned
+# to pnpm@11.10.0 — two attempts to dislodge it failed, including installing
+# pnpm@10.15.0 globally with `--force` first (docs/ai/mutation-log.md). An
+# assertion comparing pnpm's reported version against the manifest would be
+# comparing corepack's output to corepack's input, which is a tautology
+# wearing a guard's clothes.
+#
+# What was genuinely implicit is fixed here. The resolution depended on the
+# root package.json already having been copied, which is true four lines up
+# and was load-bearing without saying so; it happened lazily inside the install
+# step, so a download failure surfaced as an install failure; and no build log
+# ever named the version. Resolving it explicitly in its own layer makes the
+# ordering a stated requirement, gives the download its own cache entry, and
+# prints the number a reader of CI output would otherwise have to infer.
+RUN corepack enable \
+ && pinned="$(node -p "require('/repo/package.json').packageManager")" \
+ && corepack prepare "$pinned" --activate \
+ && echo "package manager: $pinned, reporting $(pnpm --version)"
 
 # --frozen-lockfile is the drift gate: a dependency added to a package.json
 # without the lockfile being regenerated fails the build here rather than

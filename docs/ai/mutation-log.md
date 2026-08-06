@@ -950,3 +950,36 @@ and keeping the socket open passes a memory assertion exactly as well as
 dropping does; the test that separates them reads the bytes the server actually
 sent — a contiguous prefix of seqs and then a close frame carrying 1013 — and a
 skipped frame in the middle of that prefix is the whole failure.
+
+## C19 — the pnpm pin that was already there
+
+The C19 review recorded the image build as taking "whatever pnpm the base image
+ships" and asked for a pin to the repository's `packageManager` field. The
+premise turned out to be wrong, and the two attempts to demonstrate it are the
+entry worth keeping.
+
+| Guard                                 | Mutation                                                     | Result     |
+| ------------------------------------- | ------------------------------------------------------------ | ---------- |
+| the image builds with the pinned pnpm | `npm i -g --force pnpm@10.15.0` before the version is read   | NOT CAUGHT |
+| the image builds with the pinned pnpm | the same, with `corepack prepare --activate` removed as well | NOT CAUGHT |
+
+Both builds reported pnpm 11.10.0 and installed with it. `corepack enable`
+leaves a shim that resolves the version from the nearest manifest at the moment
+pnpm is invoked, so the pin was already in force and neither a globally
+installed pnpm nor a missing `prepare` step displaces it. The mutations landed —
+the build log shows the `npm i -g` line running — so this is a guard that cannot
+fail rather than a mutation that missed.
+
+That is also the finding about the assertion originally written here. It
+compared `pnpm --version` against `packageManager`, which is comparing corepack's
+output to corepack's input: a tautology in the shape of a check, and the same
+mistake C18 recorded when a `process.getActiveResourcesInfo()` delta proved
+nothing because both sides were empty. It was removed rather than kept for
+appearances. **A guard nobody can construct a failure for is not a strict
+guard; it is decoration, and the honest move is to delete it and say why.**
+
+What was genuinely implicit is fixed: the resolution depended on the root
+package.json already having been copied, which was true and unstated; it
+happened lazily inside the install step; and no build log named the version.
+Resolving it explicitly in its own layer makes the ordering a requirement,
+gives the download its own cache entry, and prints the number.
