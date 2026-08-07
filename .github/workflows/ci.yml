@@ -381,7 +381,7 @@ jobs:
   # publishing from somewhere nobody meant.
   publish:
     needs: [image, compose]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' # MUTATION run 2: ref clause removed
     runs-on: ubuntu-latest
     permissions:
       contents: read
