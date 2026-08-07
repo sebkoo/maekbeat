@@ -17,9 +17,13 @@ import XCTest
  *
  * So this file is the enumeration: one test per default that had no caller,
  * taking it. Where the default is a socket it is taken against port 1 on
- * loopback — privileged, unbound and refused immediately, the same deterministic
- * failure `URLSessionSocketTests` uses, which needs no fixture and cannot flake
- * on a busy port.
+ * loopback — privileged and unbound, the same deterministic failure
+ * `URLSessionSocketTests` uses, which needs no fixture and cannot flake on a
+ * busy port.
+ *
+ * That refusal is deterministic but not instant: up to 7.336 s on CI. The
+ * measurements are in URLSessionSocketTests.swift and the budgets below are
+ * sized from them rather than from a round number.
  *
  * Three defaults are **not** here, and they are named rather than omitted:
  * `GatewayModel.live()`, `NotificationCoordinator.live()` and
@@ -29,7 +33,8 @@ import XCTest
  * run rather than from documentation.
  */
 final class DefaultPathTests: XCTestCase {
-    /// Port 1 on loopback: privileged, unbound, refused immediately.
+    /// Port 1 on loopback: privileged and unbound, so the connection is refused
+    /// rather than left hanging.
     private static let refusedHTTP = URL(string: "http://127.0.0.1:1")!
     private static let refusedSocket = URL(string: "ws://127.0.0.1:1/devices/sim-001/stream")!
 
@@ -143,11 +148,15 @@ final class DefaultPathTests: XCTestCase {
         let client = StreamClient(url: Self.refusedSocket, handlers: recorder.handlers)
         client.open()
 
-        // Ten seconds of budget for a ladder that needs about one and a half:
-        // the loop exits on the condition, so the headroom costs nothing and
-        // stops a loaded runner from turning this into a measurement of itself
-        // (docs/ai/AI_USAGE.md, 2026-08-06).
-        for _ in 0..<500 {
+        // This ladder is three refusals plus 500 ms and 1 s of backoff. At the
+        // 7.336 s per refusal measured on CI green run 31188295211 that is about
+        // 23.5 s, so the budget below is roughly 8x it.
+        //
+        // Sized separately from the single-refusal waits on purpose: the ladder
+        // does three times their work and a shared number would leave it the
+        // tightest margin in the suite. The loop exits on the condition, so the
+        // headroom is only ever spent on a real hang.
+        for _ in 0..<9_500 {  // 9 500 x 20 ms = 190 s
             if recorder.states.contains(.disconnected) { break }
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
@@ -172,7 +181,9 @@ final class DefaultPathTests: XCTestCase {
         client.onState = { states.append($0) }
         client.open()
 
-        for _ in 0..<500 {
+        // One refusal after an open, so this takes the single-refusal budget:
+        // roughly 8x the 7.336 s CI maximum in URLSessionSocketTests.swift.
+        for _ in 0..<3_000 {  // 3 000 x 20 ms = 60 s
             if states.contains(.reconnecting) || states.contains(.disconnected) { break }
             try? await Task.sleep(nanoseconds: 20_000_000)
         }

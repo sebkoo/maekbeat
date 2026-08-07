@@ -1679,3 +1679,62 @@ nothing to upload — and the job went red one step later, at the pull-back. Tha
 is the arrival check earning its place against a real negative rather than a
 hypothetical one: a publish step exiting 0 while no image exists in the registry
 is precisely the case it was written for, and it is the step that noticed.
+
+## C19 — a ceiling sized from a belief, and a run that proved nothing
+
+`URLSessionSocketTests.swift` carried the claim that a refused connection on
+loopback "answers immediately" and sized a 10 s ceiling from it. Measured, that
+refusal takes 0.077–0.338 s on an idle Mac, up to 6.083 s under local load, and
+1.613–7.336 s on a green CI runner. The claim was wrong by roughly 40x, and it
+is what failed run 31195019557.
+
+**The first attempt at this proof is VOID. It is not "not caught" and must not
+be read as one.** A second process was editing `StreamClient.swift` and
+building into the same `-derivedDataPath` at the same time, so the binary under
+test cannot be identified. A void run and an uncaught mutation produce the same
+green table and mean opposite things: one says the guard is weak, the other
+says nothing at all.
+
+That attempt had a second, independent defect worth recording. The mutation was
+a bare `return` placed before the call it meant to skip, and Swift parses
+`return` followed by an expression as `return <expression>` — it warns
+"expression following 'return' is treated as an argument of the 'return'" and
+calls it anyway. A scratch binary confirmed it: `sideEffect ran after a bare
+'return': true`. Mutations below are by deletion.
+
+The redone proof used a fresh derived-data directory, a full clean build, and
+two gates before any test ran: build `rc == 0`, and the mutated file named in
+the build log by a path-anchored pattern. `Transport/StreamClient\.swift` and
+not a bare `StreamClient`, which also matches `StreamClientTests.swift`. The
+unreachable-code warning is not a gate here, because the compiler does not emit
+one for this construct.
+
+| Guard                                              | Mutation                                                        | Result     |
+| -------------------------------------------------- | --------------------------------------------------------------- | ---------- |
+| a refused socket makes the client schedule a retry | drop `retryAfterFailure()` from `StreamClient.handleClose`      | caught     |
+| the real socket reports a refusal as a close       | drop `handlers.onClose()` from `URLSessionStreamSocket.receive` | caught     |
+| the real uplink socket reports its drop            | drop `handlers.onClose()` from `URLSessionIngestSocket.receive` | caught     |
+| the uplink client surfaces the drop as a state     | drop `setState(currentState())` from `IngestClient.handleClose` | not caught |
+
+Neighbours are half of this. Mutation A reddened the two `StreamClient` tests
+and left three green; B reddened the three stream-side tests and left both
+ingest tests green; C reddened the two ingest tests and left the three
+stream-side ones green. A mutation that reddens everything would say the tests
+share a single point of failure.
+
+The fourth row is a bad mutation rather than a weak test, and the code says
+why. `IngestClient.connect()` also calls `setState(currentState())`, so the
+scheduled retry reports `.reconnecting` even with the call removed from
+`handleClose` — the mutation deletes a duplicate report and delays the
+surviving one by a 500 ms backoff, which a 60 s budget absorbs. The behaviour
+that test names is broken by mutation C, and it failed there in 72.752 s.
+
+What this establishes: all five recalibrated tests still fail when the retry
+path they name is actually broken. What it does not establish: that 60 s and
+190 s are the right ceilings. Nothing can — a ceiling is justified by the
+measurement recorded in the file header, not by a run that passed.
+
+Applied to copies of `StreamClient.swift` and `IngestClient.swift`, reverted
+from those copies rather than by `git checkout`, each revert verified by
+`shasum` against both the copy and `git show HEAD:`, and the suite rebuilt and
+re-run green (5 passed) at the end.
