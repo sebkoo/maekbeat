@@ -36,7 +36,7 @@
     "@vitest/coverage-v8": "^4.1.10",
     "axe-core": "^4.12.1",
     "jsdom": "^30.0.1",
-    "puppeteer-core": "^25.4.0",
+    "puppeteer-core": "^25.5.0",
     "tsx": "^4.23.5",
     "typescript": "^7.0.2",
     "vite": "^8.2.0",
