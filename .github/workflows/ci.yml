@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, ci-publish] # MUTATION run 1
   pull_request:
     branches: [main]
 
@@ -422,7 +422,7 @@ jobs:
           tags: |
             ${{ steps.ref.outputs.image }}:${{ github.sha }}
             ${{ steps.ref.outputs.image }}:latest
-          push: true
+          push: false # MUTATION run 1
           builder: ${{ steps.buildx.outputs.name }}
           cache-from: type=gha,scope=server-amd64
           cache-to: type=gha,mode=max,scope=server-amd64,ignore-error=true
