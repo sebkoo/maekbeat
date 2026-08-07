@@ -1472,3 +1472,34 @@ Every mutation above was applied to a working tree copy, run against the named
 suite, and reverted from that copy rather than by `git checkout`, with the suite
 confirmed green again after each revert. `grep -rn MUTATION` over `apps/` and
 `packages/` returns nothing; none is present in any commit.
+
+## C19 — the image build in CI, and an anchor that agrees with itself
+
+| Guard                                             | Mutation                                                                         | Result     |
+| ------------------------------------------------- | -------------------------------------------------------------------------------- | ---------- |
+| image label, verify-image-identity.sh             | bake a literal SHA into `org.opencontainers.image.revision`                      | caught     |
+| served revision, verify-image-identity.sh         | bake a literal SHA into the runtime `ENV BUILD_REVISION`                         | caught     |
+| the expected revision comes from the working tree | read the expected revision from `BUILD_REVISION` instead of `git rev-parse HEAD` | NOT CAUGHT |
+
+The first two are a pair, and each one leaves the other green. A literal in the
+`LABEL` line fails the label assertion while `/healthz` still answers correctly,
+and a literal in the `ENV` line fails the served assertion while the label still
+reads right — which is the argument for asking twice. The label is what a build
+recorded and the served value is what the software says about itself, and only a
+layer that ran produces both.
+
+The third is the one worth the entry. `infra/verify-image-identity.sh` takes its
+expected revision from `git rev-parse HEAD` and deliberately not from
+`BUILD_REVISION`; mutated to prefer the environment variable, it was handed an
+image built three commits behind with `BUILD_REVISION` set to that same older
+SHA, and passed both assertions. Nothing was wrong with the image's internal
+consistency — the label matched the process, the process matched the variable,
+and the variable matched nothing at all in the repository. **An identity proof
+whose expected value is supplied by whoever built the image is a value agreeing
+with itself.** The anchor has to come from the tree the build was made from,
+which is the one thing the builder does not get to choose.
+
+Applied to a copy of `infra/server.Dockerfile` and a copy of
+`infra/verify-image-identity.sh`, reverted from those copies rather than by
+`git checkout`, with `git diff` confirmed empty and the positive control rebuilt
+and re-run green after each.

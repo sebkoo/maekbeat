@@ -210,6 +210,82 @@ jobs:
         run: pnpm --filter @maekbeat/web exec playwright install-deps chromium
       - run: pnpm --filter @maekbeat/web test:e2e
 
+  # Proves the deploy-target container image builds from this commit, and is
+  # still this commit once it has been built.
+  #
+  # Until this job existed, every proof in infra/verify-image.sh had run on one
+  # laptop and nowhere else — not because the platform was unavailable, but
+  # because nothing here invoked the script. It is invoked rather than restated:
+  # a CI-shaped copy of those nine proofs would prove the copy passes.
+  #
+  # The identity check above it is specific to CI. A cached layer serving an
+  # older tree is the failure it defends against, and this job is the first
+  # place in this repository where layers are cached across builds of different
+  # commits — locally the cache belongs to one machine and the tree is in front
+  # of you; here it is remote storage addressed by a scope string.
+  #
+  # The cost, stated rather than hidden: the image is built twice. The cached
+  # buildx build below is the artifact whose identity is asserted, and
+  # infra/verify-image.sh does its own uncached builds because a script that
+  # inspects a build has to make one. On this runner its two platforms are the
+  # same platform, so it builds once and hits the daemon cache once.
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # use: false on purpose. setup-buildx-action otherwise makes its
+      # docker-container builder the current one, and plain `docker build` —
+      # which is what infra/verify-image.sh runs — would then leave its result
+      # in the build cache instead of the image store, so the `docker image
+      # inspect` on the next line would find nothing.
+      - id: buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          use: false
+      # The revision comes from the checked-out tree, and is cross-checked
+      # against the SHA the event names. They agree on every trigger this
+      # workflow has; a disagreement means the job is building something other
+      # than what CI was asked about, which is worth failing on rather than
+      # discovering in the label afterwards.
+      - id: rev
+        run: |
+          set -euo pipefail
+          head=$(git rev-parse HEAD)
+          if [ "$head" != "${{ github.sha }}" ]; then
+            echo "the checkout is $head but the event names ${{ github.sha }}"
+            exit 1
+          fi
+          echo "sha=$head" >> "$GITHUB_OUTPUT"
+      # ignore-error on the export, so a fork pull request and a Dependabot run
+      # stay green: neither may write to this repository's Actions cache, and a
+      # build that succeeded should not be failed by a cache it was never going
+      # to be allowed to fill.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/server.Dockerfile
+          platforms: linux/amd64
+          build-args: BUILD_REVISION=${{ steps.rev.outputs.sha }}
+          tags: maekbeat-server:ci
+          load: true
+          builder: ${{ steps.buildx.outputs.name }}
+          cache-from: type=gha,scope=server-amd64
+          cache-to: type=gha,mode=max,scope=server-amd64,ignore-error=true
+      # Near-vacuous on an amd64 runner, where linux/amd64 is what a build with
+      # no platform at all would produce — and that is exactly why it is
+      # asserted on the artifact rather than read off the line above. The day
+      # `runs-on` moves to an arm64 runner, this is the line that notices.
+      - run: |
+          set -euo pipefail
+          arch=$(docker image inspect maekbeat-server:ci --format '{{.Architecture}}')
+          if [ "$arch" != "amd64" ]; then
+            echo "the built image reports $arch, not the deploy target's amd64"
+            exit 1
+          fi
+          echo "the built image reports $arch"
+      - run: bash infra/verify-image-identity.sh maekbeat-server:ci
+      - run: bash infra/verify-image.sh
+
   # Proves the iOS app of C14: SwiftLint clean, the app shell compiles for a
   # simulator, and the MaekbeatKit suite passes with line coverage above its
   # threshold. This job is the whole reason apps/ios is not gate-exempt — it is
