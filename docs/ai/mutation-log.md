@@ -1503,3 +1503,29 @@ Applied to a copy of `infra/server.Dockerfile` and a copy of
 `infra/verify-image-identity.sh`, reverted from those copies rather than by
 `git checkout`, with `git diff` confirmed empty and the positive control rebuilt
 and re-run green after each.
+
+## C19 — a row that reopened, and a guard that assumed rows are contiguous
+
+| Guard                                            | Mutation                                                       | Result |
+| ------------------------------------------------ | -------------------------------------------------------------- | ------ |
+| board chips cover the row, check-commit-links.sh | delete C19's second compare chip                               | caught |
+| no chip reaches across another row               | widen C19's second chip to start before C20                    | caught |
+| no chip reaches across another row               | collapse both chips back into one range spanning the whole row | caught |
+
+The third mutation is how this was found rather than a mutation invented
+afterwards. Backfilling C19's ninth commit and widening the board's compare
+range to `3260723...3ca620e` failed the guard twice — the range swallows C20 and
+C20a, which have chips of their own. The guard was right and the assumption
+underneath it was wrong: it checked each compare chip's coverage on its own,
+which is only possible if a row occupies one unbroken stretch of history. C19
+was left open, two later rows shipped, and its CI work landed after them, so its
+commits now sit on both sides of C20 and C20a.
+
+Coverage is therefore checked once per row against the union of that row's
+chips. The anti-swallowing half is untouched and still binds each range
+separately, which is what the second mutation confirms: a second chip buys a row
+the right to skip over another row's commits and nothing else. Widening one
+range instead would have been a claim that C20 and C20a belong to C19.
+
+Applied to a copy of `README.md`, reverted from that copy rather than by
+`git checkout`, with the guard confirmed green again after each.

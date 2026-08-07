@@ -151,6 +151,9 @@ done
 # ---------------------------------------------------------------------------
 board_unlinked=""
 board_rows=0
+chip_tokens=""
+COVERED=$(mktemp -d)
+trap 'rm -rf "$COVERED"' EXIT
 while IFS= read -r row; do
   board_rows=$((board_rows + 1))
   # Field 5, because a leading pipe makes field 1 empty: | Phase | Ships | Status | Commits |
@@ -183,14 +186,19 @@ while IFS= read -r row; do
     git merge-base --is-ancestor "$base" "$head" 2>/dev/null || continue
     inside=$(git rev-list "$base..$head")
 
-    # Not too narrow: every commit the roadmap lists under this row is in range.
-    for sha in $(grep -E "^ *- ${token}[,: ]" "$PLAN" | grep -ohE 'maekbeat/commit/[0-9a-f]{7,40}' | cut -d/ -f3 | sort -u); do
-      full=$(git rev-parse "$sha" 2>/dev/null) || continue
-      printf '%s\n' "$inside" | grep -q "^${full}$" ||
-        fail "$BOARD spans $token as $range, which does not contain $sha — the roadmap lists it under $token"
-    done
+    # Banked for the coverage check below, which is done once per row against
+    # the union of its chips rather than once per chip. See the block after the
+    # board loop for why a row may need more than one range.
+    printf '%s\n' "$inside" >>"$COVERED/$token"
+    case " $chip_tokens " in
+      *" $token "*) ;;
+      *) chip_tokens="$chip_tokens $token" ;;
+    esac
 
-    # Not too wide: no other row's own commit may fall inside the range.
+    # Not too wide: no other row's own commit may fall inside the range. This
+    # stays per-range and is the half that keeps a second chip from being a
+    # licence to span anything — a row with two chips still may not reach across
+    # another row's commit with either of them.
     while IFS= read -r entry; do
       other=$(printf '%s' "$entry" | grep -oE 'C[0-9]+[a-z]?' | head -1)
       [ "$other" = "$token" ] && continue
@@ -202,6 +210,30 @@ while IFS= read -r row; do
     done < <(grep -E "$SHIPPED_RE" "$PLAN")
   done < <(printf '%s\n' "$commits" | grep -oE '\[[^]]*\]\([^)]*compare/[0-9a-f]{7,40}\.\.\.[0-9a-f]{7,40}\)')
 done < <(grep -E '^\| [0-9] — ' "$BOARD")
+
+# Not too narrow, checked once per row against the union of that row's compare
+# chips rather than once per chip.
+#
+# It was written per-chip, on the assumption that a row occupies one contiguous
+# stretch of history. C19 broke the assumption rather than the rule: the row was
+# left open, C20 and C20a shipped, and then the row's CI work landed after them
+# — so its commits sit on both sides of two other rows and no single range can
+# hold them all without swallowing both. Splitting the chip is the honest
+# description of what happened; widening one range would be a claim that C20 and
+# C20a belong to C19.
+#
+# What is NOT relaxed is the anti-swallowing check above, which still binds each
+# range on its own. So two chips buy a row exactly one thing: the right to skip
+# over another row's commits, and nothing else. The board rule in README.md is
+# unchanged in substance — one chip per row, never one per commit — and now
+# reads "one chip per contiguous span".
+for token in $chip_tokens; do
+  for sha in $(grep -E "^ *- ${token}[,: ]" "$PLAN" | grep -ohE 'maekbeat/commit/[0-9a-f]{7,40}' | cut -d/ -f3 | sort -u); do
+    full=$(git rev-parse "$sha" 2>/dev/null) || continue
+    grep -q "^${full}$" "$COVERED/$token" 2>/dev/null ||
+      fail "$BOARD's compare chip(s) for $token do not cover $sha — the roadmap lists it under $token"
+  done
+done
 
 for token in $board_unlinked; do
   if [ -n "$board_exempt" ] && [ "$token" = "$board_exempt" ]; then
