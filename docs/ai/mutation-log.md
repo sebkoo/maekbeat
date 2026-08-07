@@ -1231,3 +1231,38 @@ mutation and reverted the uncommitted rewrite with it, so three later runs
 tested the previous version and two of them reported a pass that meant nothing.
 **Reverting a mutation with `git checkout` only works when the file under test
 is committed.** The rest of the battery was re-run from a copy.
+
+## C19 — the sixth test, and the number nobody was asserting
+
+| Guard                        | Mutation                                              | Result    |
+| ---------------------------- | ----------------------------------------------------- | --------- |
+| skip budget, unset revision  | park a second journey test under `test.skip(true, …)` | caught    |
+| skip budget, set revision    | run with `E2E_EXPECTED_REVISION` at HEAD, no mutation | 0 skipped |
+| skip budget, set revision    | freeze `identity.spec.ts`'s condition to `true`       | caught    |
+| the reporter is what catches | unwire `skip-budget.ts`, keep the second parked test  | passes    |
+
+The smoke job has printed `1 skipped, 5 passed` since C19 and the line was true.
+The skipped case is `e2e/identity.spec.ts`, which compares the revision on
+`/healthz` against the one the stack was built from and has nothing to compare
+against unless `E2E_EXPECTED_REVISION` says what to expect. The skip is correct
+and the reason is written at the skip site — **what was missing is any statement
+that one is the right number.**
+
+The fourth row is the whole argument. With the reporter unwired, a suite running
+four of its six tests exits 0 and prints its own shortfall into a green job, and
+that is the state the repository was in: nothing read the count. The reporter is
+what turns the count into a verdict, and the two rows above it show it failing in
+both directions.
+
+The second and third rows matter more than the first. Under
+`infra/compose-smoke.sh` the budget is zero, so a stale condition in
+`identity.spec.ts` — the exact way a conditional test goes quiet — fails the run
+instead of printing `1 skipped` where nobody would look twice. That is the only
+assertion in the repository that the identity check actually executes against the
+containers, and until the compose smoke runs in CI it is the only place it
+executes at all.
+
+One thing this does not do. It counts skips; it does not run the skipped test.
+`identity.spec.ts` still runs on a developer's machine and nowhere else, and the
+commit that changes that is the compose-smoke-in-CI commit named as remaining in
+the C19 row of [../ROADMAP.md](../ROADMAP.md).

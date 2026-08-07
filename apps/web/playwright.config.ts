@@ -1,4 +1,4 @@
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig, devices, type ReporterDescription } from "@playwright/test";
 
 /*
  * The smoke suite runs against what a visitor actually gets: a real Chromium,
@@ -48,6 +48,24 @@ export const usesExternalStack = externalBase !== undefined;
 export const BASE_URL = externalBase ?? `http://127.0.0.1:${WEB_PORT}`;
 export const API_URL = externalApi ?? `http://127.0.0.1:${API_PORT}`;
 
+/*
+ * How many of the six tests are expected to skip. One number, checked against
+ * the run by e2e/skip-budget.ts, which fails a run that disagrees.
+ *
+ * e2e/identity.spec.ts is the one, and only while E2E_EXPECTED_REVISION is
+ * unset: there is no revision to compare a running stack against when the suite
+ * was started from a working tree. infra/compose-smoke.sh sets it, so the
+ * budget there is zero — which is what asserts that test does run against the
+ * containers instead of skipping in the one place it was written for.
+ *
+ * Any other skip is unbudgeted and fails, which is the point: "1 skipped" has
+ * been printing into a green job since C19 with nothing claiming 1 is correct.
+ */
+export const EXPECTED_SKIPS = process.env.E2E_EXPECTED_REVISION === undefined ? 1 : 0;
+
+const reporters: ReporterDescription[] = process.env.CI ? [["list"], ["github"]] : [["list"]];
+reporters.push(["./e2e/skip-budget.ts", { expected: EXPECTED_SKIPS }]);
+
 export default defineConfig({
   testDir: "./e2e",
   // Smoke, not suite: a handful of tests that must always be worth their
@@ -67,7 +85,7 @@ export default defineConfig({
    */
   retries: 0,
   forbidOnly: !!process.env.CI,
-  reporter: process.env.CI ? [["list"], ["github"]] : [["list"]],
+  reporter: reporters,
 
   use: {
     baseURL: BASE_URL,

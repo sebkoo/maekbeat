@@ -23,6 +23,15 @@ import { API_URL } from "../playwright.config";
  * against when the suite runs against `pnpm start` from a working tree, and a
  * green tick for a comparison that did not happen is the failure mode this
  * whole file is about.
+ *
+ * Where that leaves it today, stated because the CI log does not: nothing in
+ * .github/workflows/ci.yml stands up the compose stack, so this is the one test
+ * in the suite that has never run there. It runs on a developer's machine, via
+ * infra/compose-smoke.sh, and it starts running in CI at the commit that puts
+ * the compose smoke into the workflow — named as still to come in the C19 row
+ * of docs/ROADMAP.md. Until then the skip is correct and the coverage is not:
+ * the number of skips is budgeted in playwright.config.ts so this one stays the
+ * only one, which is a different thing from it being checked.
  */
 const expected = process.env.E2E_EXPECTED_REVISION;
 
