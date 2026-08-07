@@ -10,6 +10,7 @@ import { AlertEngine, DEFAULT_ALERT_RULES, type AlertRuleConfig } from "./alerts
 import { UNIDENTIFIED_REVISION, type ServerConfig } from "./config";
 import { INGEST_MAX_PAYLOAD_BYTES, ingestPlugin, type IngestCounters } from "./ingest";
 import { readsPlugin } from "./reads";
+import { SilenceDetector, silencePlugin, sweepIntervalFor } from "./silence";
 import { VitalsStore } from "./store";
 import { DeviceBroadcaster, streamPlugin } from "./stream";
 import { packageVersion } from "./version";
@@ -20,6 +21,14 @@ declare module "fastify" {
     alertEngine: AlertEngine;
     deviceBroadcaster: DeviceBroadcaster;
     decisionLog: DecisionLog;
+    /**
+     * Decorated for the same reason the engine is, and for one more: the sweep
+     * is the only thing in this server that runs on a timer with no request
+     * behind it, so a test that cannot drive it by hand has to drive it by
+     * waiting — and a suite that waits on wall-clock time is the suite C11
+     * already had to repair once.
+     */
+    silenceDetector: SilenceDetector;
   }
 }
 
@@ -35,6 +44,22 @@ export interface BuildAppOptions {
   tracer?: Tracer;
   /** Receive clock for the ingest path; omitted, `Date.now`. */
   now?: () => number;
+  /**
+   * Whether to arm the periodic silence sweep (C20a); omitted, it is armed.
+   *
+   * Deliberately NOT folded into `now` above, even though the two clocks are
+   * the same clock in production. That seam is a call-counting fake — one
+   * tick per call, so the receive stamps depend on how many times it was read
+   * — and a sweep sharing it would move the stamps it exists to leave alone.
+   *
+   * Passed `false`, the detector still exists and still holds its history; it
+   * simply moves only when something calls `app.silenceDetector.sweep()`. That
+   * is the whole of "off", because sweeping is the whole of what it does — it
+   * has no hook on the ingest path to disable. src/silence.golden.test.ts
+   * relies on that, and src/silence.integration.test.ts drives the armed
+   * default so the production path has a caller of its own.
+   */
+  armSilenceSweep?: boolean;
 }
 
 export async function buildApp(config: ServerConfig, options: BuildAppOptions = {}) {
@@ -103,11 +128,24 @@ export async function buildApp(config: ServerConfig, options: BuildAppOptions = 
       ),
   });
   const broadcaster = new DeviceBroadcaster();
+  // Reads the store's last-seen stamps on a timer and touches nothing on the
+  // ingest path — the alarm for the absence of data (C20a, src/silence.ts).
+  const silence = new SilenceDetector({
+    source: store,
+    silenceMs: config.DEVICE_SILENCE_MS,
+    isDecided: (deviceId, alertId) => decisions.isDecided(deviceId, alertId),
+    onForcedEviction: ({ deviceId, alertId }) =>
+      app.log.warn(
+        { deviceId, alertId },
+        "silence history full of undecided episodes; dropped the oldest closed one",
+      ),
+  });
   const counters: IngestCounters = { received: 0, rejectedInvalid: 0 };
   app.decorate("vitalsStore", store);
   app.decorate("alertEngine", engine);
   app.decorate("deviceBroadcaster", broadcaster);
   app.decorate("decisionLog", decisions);
+  app.decorate("silenceDetector", silence);
 
   await app.register(fastifyWebsocket, { options: { maxPayload: INGEST_MAX_PAYLOAD_BYTES } });
   await app.register(ingestPlugin, {
@@ -118,12 +156,19 @@ export async function buildApp(config: ServerConfig, options: BuildAppOptions = 
     tracer: options.tracer,
     now: options.now,
   });
-  await app.register(readsPlugin, { store, engine, counters, decisions, broadcaster });
+  await app.register(readsPlugin, { store, engine, counters, decisions, broadcaster, silence });
   await app.register(streamPlugin, {
     broadcaster,
     ringCapacity: config.RING_CAPACITY,
     heartbeatMs: config.STREAM_HEARTBEAT_MS,
   });
+  if (options.armSilenceSweep !== false) {
+    await app.register(silencePlugin, {
+      detector: silence,
+      broadcaster,
+      intervalMs: sweepIntervalFor(config.DEVICE_SILENCE_MS),
+    });
+  }
 
   app.get(
     "/healthz",

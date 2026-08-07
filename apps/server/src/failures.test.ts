@@ -110,6 +110,11 @@ describe("socket drop and reconnect", () => {
       suppressed: 0,
       acknowledged: 0,
       dismissed: 0,
+      // The gap here is a socket drop, not a silent device: frames resumed
+      // well inside DEVICE_SILENCE_MS, so the C20a detector has nothing to say.
+      silenceRaised: 0,
+      silenceResolved: 0,
+      silenceForcedEvicted: 0,
     });
     expect(body?.alerts[0]?.state).toBe("resolved");
 

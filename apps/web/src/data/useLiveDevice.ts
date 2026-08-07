@@ -3,6 +3,7 @@ import {
   type AlertDecision,
   type AlertDecisionEvent,
   type AlertEvent,
+  type DeviceSilenceEvent,
 } from "@maekbeat/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -25,6 +26,8 @@ export const BACKFILL_LIMIT = 1_000;
 export interface LiveWindow {
   frames: StoredFrame[];
   alerts: AlertEvent[];
+  /** Episodes of the device sending nothing at all (C20a). */
+  silence: DeviceSilenceEvent[];
   /** The device's append-only decision log, oldest first (C12). */
   decisions: AlertDecisionEvent[];
   /**
@@ -109,6 +112,21 @@ export function mergeAlerts(current: readonly AlertEvent[], incoming: readonly A
 }
 
 /**
+ * The same rule for silence episodes, and it has to be: the server publishes a
+ * raise and then a resolve under one alertId, so an append would leave the
+ * dashboard showing a device as still quiet after it came back.
+ */
+export function mergeSilence(
+  current: readonly DeviceSilenceEvent[],
+  incoming: readonly DeviceSilenceEvent[],
+) {
+  if (incoming.length === 0) return current as DeviceSilenceEvent[];
+  const byId = new Map(current.map((episode) => [episode.alertId, episode]));
+  for (const episode of incoming) byId.set(episode.alertId, episode);
+  return [...byId.values()].sort((a, b) => a.raisedAtMs - b.raisedAtMs);
+}
+
+/**
  * One device, live: a REST read on mount, then the fan-out socket appended to
  * it. A reconnect never resumes silently — it re-reads the window from REST
  * first, so a hole in coverage stays a hole in the data rather than becoming an
@@ -133,6 +151,7 @@ export function useLiveDevice(deviceId: string): LiveDevice {
       return {
         frames: frames.frames,
         alerts: alerts.alerts,
+        silence: alerts.silence,
         decisions: alerts.decisions,
         counters: alerts.counters,
       };
@@ -150,8 +169,9 @@ export function useLiveDevice(deviceId: string): LiveDevice {
   const pending = useRef<{
     frames: StoredFrame[];
     alerts: AlertEvent[];
+    silence: DeviceSilenceEvent[];
     decisions: AlertDecisionEvent[];
-  }>({ frames: [], alerts: [], decisions: [] });
+  }>({ frames: [], alerts: [], silence: [], decisions: [] });
 
   /** The current subscription's signal, read by decide() to detect staleness. */
   const subscriptionScope = useRef<AbortSignal>(new AbortController().signal);
@@ -163,7 +183,7 @@ export function useLiveDevice(deviceId: string): LiveDevice {
     setMalformed(0);
     setPendingDecisions(new Set());
     setDecisionFailures(new Map());
-    pending.current = { frames: [], alerts: [], decisions: [] };
+    pending.current = { frames: [], alerts: [], silence: [], decisions: [] };
     // Scopes the back-fill to this subscription: a read still in flight when
     // the device changes must never merge one device's frames into another's
     // window.
@@ -186,6 +206,14 @@ export function useLiveDevice(deviceId: string): LiveDevice {
             return current;
           }
           return { ...current, alerts: mergeAlerts(current.alerts, [alert]) };
+        }),
+      onSilence: (episode) =>
+        setLive((current) => {
+          if (current === null) {
+            pending.current.silence.push(episode);
+            return current;
+          }
+          return { ...current, silence: mergeSilence(current.silence, [episode]) };
         }),
       onDecision: (event) => {
         clearFailure(event.alertId);
@@ -217,6 +245,7 @@ export function useLiveDevice(deviceId: string): LiveDevice {
                 : {
                     frames: mergeFrames(current.frames, frames.frames),
                     alerts: mergeAlerts(current.alerts, alerts.alerts),
+                    silence: mergeSilence(current.silence, alerts.silence),
                     decisions: mergeDecisions(current.decisions, alerts.decisions),
                     counters: alerts.counters,
                   },
@@ -245,10 +274,11 @@ export function useLiveDevice(deviceId: string): LiveDevice {
     setLive((current) => {
       if (current === null) {
         const held = pending.current;
-        pending.current = { frames: [], alerts: [], decisions: [] };
+        pending.current = { frames: [], alerts: [], silence: [], decisions: [] };
         return {
           frames: mergeFrames(seed.frames, held.frames),
           alerts: mergeAlerts(seed.alerts, held.alerts),
+          silence: mergeSilence(seed.silence, held.silence),
           decisions: mergeDecisions(seed.decisions, held.decisions),
           counters: seed.counters,
         };
@@ -256,6 +286,7 @@ export function useLiveDevice(deviceId: string): LiveDevice {
       return {
         frames: mergeFrames(current.frames, seed.frames),
         alerts: mergeAlerts(current.alerts, seed.alerts),
+        silence: mergeSilence(current.silence, seed.silence),
         decisions: mergeDecisions(current.decisions, seed.decisions),
         counters: seed.counters,
       };

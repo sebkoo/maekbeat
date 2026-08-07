@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { DEVICE_SILENCE_MS_DEFAULT } from "./silence";
 import { STREAM_HEARTBEAT_MS_DEFAULT } from "./stream";
 
 /**
@@ -41,6 +42,33 @@ const envSchema = z.object({
     .min(1_000)
     .max(300_000)
     .default(STREAM_HEARTBEAT_MS_DEFAULT),
+  /**
+   * Maximum silence from a DEVICE before the server raises an alarm about it
+   * (src/silence.ts). The heartbeat above proves the socket; this judges the
+   * sensor, and until C20a nothing did — from the fan-out layer a calm patient
+   * and a dead link looked identical.
+   *
+   * Configurable because the value that matters is a property of the gateway
+   * and the link in front of this server rather than of the server: the
+   * default is derived from apps/ios's own reconnect deadlines, and a
+   * deployment whose devices report at a different cadence, or reconnect on
+   * different timings, has a different right answer.
+   *
+   * The floor is 5 s because the fastest cadence this repository documents is
+   * the simulator's 1 Hz, so five seconds is five consecutive missed frames —
+   * the tightest value that is about silence rather than jitter. The ceiling
+   * is one hour because past that the alarm is not monitoring. What the
+   * bounds cannot check is the judgement: this schema does not know the
+   * deployment's reconnect window, so a value below it parses here and is
+   * wrong there, which is why the default's basis is written down in
+   * src/silence.ts and pinned by a test rather than asserted in prose.
+   */
+  DEVICE_SILENCE_MS: z.coerce
+    .number()
+    .int()
+    .min(5_000)
+    .max(3_600_000)
+    .default(DEVICE_SILENCE_MS_DEFAULT),
   /**
    * OTLP/HTTP traces endpoint. Its presence is the entire on switch: unset,
    * the server builds no exporter, no span processor and no batch timer, and

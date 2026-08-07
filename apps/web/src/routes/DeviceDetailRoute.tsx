@@ -53,7 +53,7 @@ export function DeviceDetailRoute() {
     return <ReadFailure error={state.error} onRetry={reload} headingLevel={1} />;
   }
 
-  const { frames, alerts, counters } = state.data;
+  const { frames, alerts, silence, counters } = state.data;
   // Episode durations are measured against the newest frame's receive stamp,
   // not a wall clock: every other time on this page comes from the pipeline.
   const nowMs = frames[frames.length - 1]?.receivedAtMs ?? 0;
@@ -73,7 +73,12 @@ export function DeviceDetailRoute() {
 
   return (
     <>
-      <AlertAnnouncer alerts={alerts} decisions={decisions} connection={connection} />
+      <AlertAnnouncer
+        alerts={alerts}
+        silence={silence}
+        decisions={decisions}
+        connection={connection}
+      />
       <div className="mb-page__heading">
         <h1 className="mb-page__title">{deviceId}</h1>
         <ConnectionBadge state={connection} />
@@ -137,10 +142,12 @@ export function DeviceDetailRoute() {
           {counters.suppressed} suppressed · {counters.acknowledged} acknowledged ·{" "}
           {counters.dismissed} dismissed. A suppressed episode leaves no record to stream, so that
           number moves only when the window is re-read. Thresholds are demo heuristics, not clinical
-          rules.
+          rules. A &ldquo;no data from device&rdquo; row is not a threshold at all — it is the
+          server reporting that nothing arrived for longer than its configured limit.
         </p>
         <AlertTimeline
           alerts={alerts}
+          silence={silence}
           decisions={decisions}
           pending={pendingDecisions}
           failures={decisionFailures}

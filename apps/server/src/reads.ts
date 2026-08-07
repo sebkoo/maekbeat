@@ -5,6 +5,7 @@ import type { AlertDecision } from "@maekbeat/protocol";
 import type { DecisionLog } from "./acks";
 import { parseAlertId, type AlertEngine } from "./alerts";
 import type { IngestCounters } from "./ingest";
+import type { SilenceDetector } from "./silence";
 import type { VitalsStore } from "./store";
 import type { DeviceBroadcaster } from "./stream";
 
@@ -16,6 +17,8 @@ export interface ReadsPluginOptions {
   decisions: DecisionLog;
   /** Fan-out, so one caregiver's decision reaches every open dashboard. */
   broadcaster?: DeviceBroadcaster;
+  /** The absence-of-data alarm (C20a); its episodes are served beside alerts. */
+  silence: SilenceDetector;
 }
 
 // Response schemas are hand-written JSON Schema mirroring the zod wire contract
@@ -99,6 +102,39 @@ const decisionEventJsonSchema = {
   },
 } as const;
 
+// Mirrors @maekbeat/protocol deviceSilenceEventSchema; the drift test in
+// reads.test.ts pins the field sets against each other.
+const silenceEventJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "alertId",
+    "deviceId",
+    "kind",
+    "state",
+    "raisedAtMs",
+    "lastFrameAtMs",
+    "thresholdMs",
+    "silentForMs",
+    "sessionEpoch",
+  ],
+  properties: {
+    alertId: { type: "string" },
+    deviceId: { type: "string" },
+    kind: { type: "string", enum: ["silence"] },
+    state: { type: "string", enum: ["raised", "ongoing", "resolved"] },
+    raisedAtMs: {
+      type: "integer",
+      description: "server clock when the sweep judged the device silent",
+    },
+    resolvedAtMs: { type: "integer", description: "receive time of the frame that ended it" },
+    lastFrameAtMs: { type: "integer", description: "receive time of the last frame before it" },
+    thresholdMs: { type: "integer", description: "DEVICE_SILENCE_MS in force at the raise" },
+    silentForMs: { type: "integer" },
+    sessionEpoch: { type: "integer", minimum: 1 },
+  },
+} as const;
+
 const notFoundJsonSchema = {
   type: "object",
   additionalProperties: false,
@@ -111,7 +147,7 @@ const notFoundJsonSchema = {
 
 /** REST reads over the ring buffer: device listing + per-device frames. */
 export const readsPlugin: FastifyPluginAsync<ReadsPluginOptions> = async (app, opts) => {
-  const { store, engine, counters, decisions, broadcaster } = opts;
+  const { store, engine, counters, decisions, broadcaster, silence } = opts;
 
   app.get(
     "/devices",
@@ -269,7 +305,10 @@ export const readsPlugin: FastifyPluginAsync<ReadsPluginOptions> = async (app, o
           "acknowledged/dismissed are the decisions in force over the retained " +
           "decision log, so they can fall as well as rise. Thresholds are demo heuristics for a " +
           "notification demo of the kind used in monitoring research, not " +
-          "clinical rules.",
+          "clinical rules. `silence` is a separate list because a device that " +
+          "stopped sending has no metric and no window — it is the absence of " +
+          "data rather than a value (C20a, apps/server/src/silence.ts) — and " +
+          "its episodes are acknowledged through the same decision route.",
         params: {
           type: "object",
           additionalProperties: false,
@@ -280,23 +319,40 @@ export const readsPlugin: FastifyPluginAsync<ReadsPluginOptions> = async (app, o
           200: {
             type: "object",
             additionalProperties: false,
-            required: ["deviceId", "counters", "alerts", "decisions"],
+            required: ["deviceId", "counters", "alerts", "decisions", "silence"],
             properties: {
               deviceId: { type: "string" },
               counters: {
                 type: "object",
                 additionalProperties: false,
-                required: ["raised", "resolved", "suppressed", "acknowledged", "dismissed"],
+                required: [
+                  "raised",
+                  "resolved",
+                  "suppressed",
+                  "acknowledged",
+                  "dismissed",
+                  "silenceRaised",
+                  "silenceResolved",
+                  "silenceForcedEvicted",
+                ],
                 properties: {
                   raised: { type: "integer" },
                   resolved: { type: "integer" },
                   suppressed: { type: "integer" },
                   acknowledged: { type: "integer" },
                   dismissed: { type: "integer" },
+                  silenceRaised: { type: "integer" },
+                  silenceResolved: { type: "integer" },
+                  silenceForcedEvicted: {
+                    type: "integer",
+                    description:
+                      "closed silence episodes dropped because none of them had been triaged",
+                  },
                 },
               },
               alerts: { type: "array", items: alertEventJsonSchema },
               decisions: { type: "array", items: decisionEventJsonSchema },
+              silence: { type: "array", items: silenceEventJsonSchema },
             },
           },
           404: notFoundJsonSchema,
@@ -310,11 +366,19 @@ export const readsPlugin: FastifyPluginAsync<ReadsPluginOptions> = async (app, o
       if (store.readFrames(deviceId, { limit: 1 }) === undefined) {
         return reply.status(404).send({ statusCode: 404, message: `unknown device: ${deviceId}` });
       }
+      const silenceCounters = silence.countersFor(deviceId);
       return {
         deviceId,
-        counters: { ...engine.countersFor(deviceId), ...decisions.countsFor(deviceId) },
+        counters: {
+          ...engine.countersFor(deviceId),
+          ...decisions.countsFor(deviceId),
+          silenceRaised: silenceCounters.raised,
+          silenceResolved: silenceCounters.resolved,
+          silenceForcedEvicted: silenceCounters.forcedEvictions,
+        },
         alerts: engine.listAlerts(deviceId),
         decisions: decisions.list(deviceId),
+        silence: silence.listEpisodes(deviceId),
       };
     },
   );
@@ -345,7 +409,9 @@ export const readsPlugin: FastifyPluginAsync<ReadsPluginOptions> = async (app, o
           "accepted for an alertId this device owns whose rule, raise ordinal " +
           "and raise time this engine could have minted — checked from the id " +
           "itself, not from the record. A malformed id or an unknown rule is " +
-          "400; another device's id, or one this device never raised, is 404.",
+          "400; another device's id, or one this device never raised, is 404. " +
+          "A silence episode is decided here too, under rule id `device-silent` " +
+          "and its own per-device raise ordinal (C20a).",
         params: {
           type: "object",
           additionalProperties: false,
@@ -399,12 +465,20 @@ export const readsPlugin: FastifyPluginAsync<ReadsPluginOptions> = async (app, o
       // raise ordinal is one it has actually reached for this device, and the
       // raise time is not in the future. That keeps decisions on alerts this
       // server could never have minted out of an append-only log.
-      if (!engine.hasRule(parsed.ruleId)) {
+      // Two raisers, one handle. The silence detector mints ids in the same
+      // format under its own rule id and its own per-device ordinal, so the
+      // ownership checks below are the same three questions asked of whichever
+      // of the two could have minted this id (C20a).
+      const raisedBySilence = silence.hasRule(parsed.ruleId);
+      if (!engine.hasRule(parsed.ruleId) && !raisedBySilence) {
         return reply
           .status(400)
           .send({ statusCode: 400, message: `unknown alert rule: ${parsed.ruleId}` });
       }
-      if (parsed.ordinal > engine.countersFor(deviceId).raised || parsed.raisedAtMs > Date.now()) {
+      const raisedCount = raisedBySilence
+        ? silence.countersFor(deviceId).raised
+        : engine.countersFor(deviceId).raised;
+      if (parsed.ordinal > raisedCount || parsed.raisedAtMs > Date.now()) {
         return reply
           .status(404)
           .send({ statusCode: 404, message: `alert ${alertId} was never raised on ${deviceId}` });

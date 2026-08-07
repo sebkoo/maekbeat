@@ -12,6 +12,7 @@ describe("loadConfig", () => {
       RING_CAPACITY: 1024,
       CORS_ORIGIN: "*",
       STREAM_HEARTBEAT_MS: 25_000,
+      DEVICE_SILENCE_MS: 45_000,
       // Tracing is off by default, and off is the absence of an endpoint
       // rather than a boolean beside one: there is no configuration in which
       // an endpoint is set and unused (src/tracing.ts).
@@ -30,6 +31,7 @@ describe("loadConfig", () => {
         RING_CAPACITY: "512",
         CORS_ORIGIN: "https://dash.example",
         STREAM_HEARTBEAT_MS: "30000",
+        DEVICE_SILENCE_MS: "90000",
         OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://collector.example:4318/v1/traces",
         OTEL_SERVICE_NAME: "maekbeat-server-eu",
         BUILD_REVISION: "0123abc",
@@ -42,6 +44,7 @@ describe("loadConfig", () => {
       RING_CAPACITY: 512,
       CORS_ORIGIN: "https://dash.example",
       STREAM_HEARTBEAT_MS: 30_000,
+      DEVICE_SILENCE_MS: 90_000,
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://collector.example:4318/v1/traces",
       OTEL_SERVICE_NAME: "maekbeat-server-eu",
       BUILD_REVISION: "0123abc",

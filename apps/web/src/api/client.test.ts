@@ -36,6 +36,19 @@ const ALERT = {
   windowStats: { windowMs: 15_000, sampleCount: 15, breachCount: 5, minValue: 86, maxValue: 94 },
 };
 
+const SILENCE = {
+  alertId: "dev-1:device-silent:1754000200000:1",
+  deviceId: "dev-1",
+  kind: "silence",
+  state: "resolved",
+  raisedAtMs: 1_754_000_200_000,
+  resolvedAtMs: 1_754_000_260_000,
+  lastFrameAtMs: 1_754_000_154_000,
+  thresholdMs: 45_000,
+  silentForMs: 106_000,
+  sessionEpoch: 1,
+};
+
 const DECISION = {
   eventId: "dev-1:decision:1",
   alertId: "dev-1:spo2-low:1",
@@ -132,6 +145,7 @@ describe("createApiClient — happy path", () => {
       counters: { raised: 1, resolved: 1, suppressed: 0, acknowledged: 1, dismissed: 0 },
       alerts: [ALERT],
       decisions: [DECISION],
+      silence: [SILENCE],
     });
     const api = createApiClient({ baseUrl: BASE, fetchImpl });
 
@@ -139,6 +153,11 @@ describe("createApiClient — happy path", () => {
     expect(page.alerts[0]?.state).toBe("resolved");
     expect(page.counters.raised).toBe(1);
     expect(page.decisions).toEqual([DECISION]);
+    // Silence episodes come back as their own list, not folded into `alerts`:
+    // the dashboard must be able to tell "a value crossed a line" from
+    // "nothing arrived at all" without inspecting a field (C20a).
+    expect(page.silence).toEqual([SILENCE]);
+    expect(page.alerts).toHaveLength(1);
     expect(calls).toEqual([`${BASE}/devices/dev-1/alerts`]);
   });
 
@@ -372,6 +391,7 @@ describe("subscribe — the streaming member (C11)", () => {
     const frames: unknown[] = [];
     const alerts: unknown[] = [];
     const decisions: unknown[] = [];
+    const silences: unknown[] = [];
     const states: string[] = [];
     const invalid: number[] = [];
     const closed = { count: 0 };
@@ -394,6 +414,7 @@ describe("subscribe — the streaming member (C11)", () => {
       onFrame: (frame) => frames.push(frame),
       onAlert: (alert) => alerts.push(alert),
       onDecision: (decision) => decisions.push(decision),
+      onSilence: (episode) => silences.push(episode),
       onState: (state) => states.push(state),
       onReconnect: () => {},
       onInvalidMessage: () => invalid.push(1),
@@ -406,6 +427,7 @@ describe("subscribe — the streaming member (C11)", () => {
       frames,
       alerts,
       decisions,
+      silences,
       states,
       invalid,
       closed,
@@ -427,11 +449,16 @@ describe("subscribe — the streaming member (C11)", () => {
     h.deliver({ type: "frame", frame: FRAME });
     h.deliver({ type: "alert", alert: ALERT });
     h.deliver({ type: "decision", decision: DECISION });
+    h.deliver({ type: "silence", silence: SILENCE });
 
     expect(h.frames).toEqual([FRAME]);
     expect(h.alerts).toEqual([ALERT]);
     // A decision another dashboard recorded reaches this one too (C12).
     expect(h.decisions).toEqual([DECISION]);
+    // The one message with no frame behind it (C20a). It must not arrive as an
+    // alert: a device that stopped sending has no metric to name.
+    expect(h.silences).toEqual([SILENCE]);
+    expect(h.alerts).toHaveLength(1);
     expect(h.states).toEqual(["connecting", "live"]);
   });
 
@@ -465,6 +492,7 @@ describe("subscribe — the streaming member (C11)", () => {
       onFrame: () => {},
       onAlert: () => {},
       onDecision: () => {},
+      onSilence: () => {},
       onState: () => {},
       onReconnect: () => {},
     });

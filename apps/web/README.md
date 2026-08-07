@@ -1,6 +1,6 @@
 # @maekbeat/web
 
-The caregiver dashboard, C10–C19 of [docs/ROADMAP.md](../../docs/ROADMAP.md): a React 19 + Vite + TypeScript app with the design tokens the rest of Phase 4 draws from, a typed client for the [apps/server](../server) surface, and — since C11 — live vitals over the fan-out WebSocket. C12 adds the alert timeline, server-recorded acknowledgement, and the WCAG 2.2 AA pass.
+The caregiver dashboard, C10–C20a of [docs/ROADMAP.md](../../docs/ROADMAP.md): a React 19 + Vite + TypeScript app with the design tokens the rest of Phase 4 draws from, a typed client for the [apps/server](../server) surface, and — since C11 — live vitals over the fan-out WebSocket. C12 adds the alert timeline, server-recorded acknowledgement, and the WCAG 2.2 AA pass; C20a adds the timeline row for a device that has stopped sending, so a gap the chart already drew as a gap can say that it matters.
 
 ## Run it
 

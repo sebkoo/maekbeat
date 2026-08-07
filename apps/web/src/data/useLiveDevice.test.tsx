@@ -1,4 +1,4 @@
-import type { AlertDecisionEvent, AlertEvent } from "@maekbeat/protocol";
+import type { AlertDecisionEvent, AlertEvent, DeviceSilenceEvent } from "@maekbeat/protocol";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -12,6 +12,7 @@ import {
   MAX_FRAMES,
   mergeAlerts,
   mergeDecisions,
+  mergeSilence,
   useLiveDevice,
   mergeFrames,
 } from "./useLiveDevice";
@@ -44,6 +45,18 @@ const ALERT: AlertEvent = {
   windowStats: { windowMs: 15_000, sampleCount: 15, breachCount: 5, minValue: 86, maxValue: 94 },
 };
 
+const SILENCE: DeviceSilenceEvent = {
+  alertId: "dev-1:device-silent:1754000100000:1",
+  deviceId: "dev-1",
+  kind: "silence",
+  state: "raised",
+  raisedAtMs: BASE_MS + 100_000,
+  lastFrameAtMs: BASE_MS + 54_000,
+  thresholdMs: 45_000,
+  silentForMs: 46_000,
+  sessionEpoch: 1,
+};
+
 /** An API whose socket the test drives, and whose REST reads it counts. */
 function fakeApi(initial: StoredFrame[]) {
   let handlers: DeviceStreamHandlers | undefined;
@@ -66,6 +79,7 @@ function fakeApi(initial: StoredFrame[]) {
     counters: { raised: 1, resolved: 0, suppressed: 2, acknowledged: 0, dismissed: 0 },
     alerts: [] as AlertEvent[],
     decisions: [] as AlertDecisionEvent[],
+    silence: [] as DeviceSilenceEvent[],
   }));
   const recordDecision = vi.fn(
     async (deviceId: string, alertId: string, decision: "acknowledged" | "dismissed") => ({
@@ -582,5 +596,69 @@ describe("useLiveDevice", () => {
     rerender({ id: "dev-2" });
 
     expect(fake.closed.count).toBe(1);
+  });
+});
+
+describe("silence episodes in the live window", () => {
+  /**
+   * A raise and a resolve share one alertId, so the merge has to REPLACE. An
+   * append would leave the dashboard showing a device as still quiet after it
+   * came back — the exact failure C11 fixed for frames and C12 for alerts,
+   * arriving a third time through a third list.
+   */
+  it("replaces an episode on its resolve rather than appending a second row", () => {
+    const resolved: DeviceSilenceEvent = {
+      ...SILENCE,
+      state: "resolved",
+      resolvedAtMs: BASE_MS + 160_000,
+      silentForMs: 106_000,
+    };
+    const merged = mergeSilence([SILENCE], [resolved]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.state).toBe("resolved");
+  });
+
+  it("orders by raise time and leaves an empty push untouched", () => {
+    const older: DeviceSilenceEvent = { ...SILENCE, alertId: "s0", raisedAtMs: BASE_MS };
+    expect(mergeSilence([SILENCE], [older]).map((e) => e.alertId)).toEqual(["s0", SILENCE.alertId]);
+    const held = [SILENCE];
+    expect(mergeSilence(held, [])).toBe(held);
+  });
+
+  it("lands a socket push in the window", async () => {
+    const fake = fakeApi([frame(0)]);
+    const { result } = renderHook(() => useLiveDevice("dev-1"), {
+      wrapper: wrapper(fake.api),
+    });
+
+    await waitFor(() => {
+      expect(result.current.state.status).toBe("ready");
+    });
+
+    act(() => {
+      fake.handlers()?.onSilence(SILENCE);
+    });
+
+    expect(
+      result.current.state.status === "ready" ? result.current.state.data.silence : [],
+    ).toEqual([SILENCE]);
+  });
+
+  /**
+   * The alarm can arrive before the mount read has seeded the window, and it is
+   * the one message where dropping it is worst: a silent device sends nothing
+   * else, so nothing later would ever push it again — the caregiver would find
+   * out on the next reload, or not at all.
+   */
+  it("holds an episode that arrives before the window exists", async () => {
+    const fake = fakeApi([frame(1)]);
+    const { result } = renderHook(() => useLiveDevice("dev-1"), { wrapper: wrapper(fake.api) });
+
+    act(() => fake.handlers()?.onSilence(SILENCE));
+    await waitFor(() => expect(result.current.state.status).toBe("ready"));
+
+    const state = result.current.state;
+    expect(state.status === "ready" && state.data.silence).toEqual([SILENCE]);
   });
 });

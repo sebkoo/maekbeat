@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { alertDecisionEventSchema } from "./acks";
 import { alertEventSchema } from "./alerts";
+import { deviceSilenceEventSchema } from "./silence";
 import { vitalsFrameSchema } from "./vitals";
 
 /*
@@ -54,11 +55,30 @@ export const streamDecisionSchema = z.strictObject({
   decision: alertDecisionEventSchema,
 });
 
+/**
+ * A device stopped sending, or started again (C20a).
+ *
+ * A fifth message type rather than a fifth field on `alert`, for the reason
+ * silence has its own schema at all (src/silence.ts): the two records answer
+ * different questions and only one of them has a metric. The cost is stated
+ * where it lands — apps/ios decodes `type` against four cases and throws
+ * `ContractError.unknownMessageType` on a fifth, which its stream client turns
+ * into an `onInvalidMessage` callback rather than a closed socket
+ * (apps/ios/MaekbeatKit/Sources/MaekbeatKit/Transport/StreamClient.swift:195).
+ * That app therefore counts a silence message as dropped and says so on the
+ * device screen; teaching it the case needs Swift, which C20a does not touch.
+ */
+export const streamSilenceSchema = z.strictObject({
+  type: z.literal("silence"),
+  silence: deviceSilenceEventSchema,
+});
+
 /** Every message a dashboard can receive on the fan-out socket. */
 export const streamMessageSchema = z.discriminatedUnion("type", [
   streamReadySchema,
   streamFrameSchema,
   streamAlertSchema,
   streamDecisionSchema,
+  streamSilenceSchema,
 ]);
 export type StreamMessage = z.infer<typeof streamMessageSchema>;

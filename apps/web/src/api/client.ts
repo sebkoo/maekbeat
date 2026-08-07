@@ -3,6 +3,7 @@ import {
   type AlertDecision,
   type AlertDecisionEvent,
   type AlertEvent,
+  type DeviceSilenceEvent,
 } from "@maekbeat/protocol";
 
 import {
@@ -60,6 +61,11 @@ export interface DeviceStreamHandlers {
   onAlert: (alert: AlertEvent) => void;
   /** Another dashboard recorded a decision on this device (C12). */
   onDecision: (decision: AlertDecisionEvent) => void;
+  /**
+   * The device stopped sending, or started again (C20a). The one message on
+   * this socket that no frame caused, which is the entire point of it.
+   */
+  onSilence: (silence: DeviceSilenceEvent) => void;
   onState: (state: ConnectionState) => void;
   /** A re-open: the caller back-fills the missed window over REST. */
   onReconnect: () => void;
@@ -157,6 +163,7 @@ export function createApiClient(options: ApiClientOptions = {}): MaekbeatApi {
             if (message.type === "frame") handlers.onFrame(message.frame);
             else if (message.type === "alert") handlers.onAlert(message.alert);
             else if (message.type === "decision") handlers.onDecision(message.decision);
+            else if (message.type === "silence") handlers.onSilence(message.silence);
           },
           onState: handlers.onState,
           onReconnect: handlers.onReconnect,

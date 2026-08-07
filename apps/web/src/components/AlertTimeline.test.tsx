@@ -1,4 +1,4 @@
-import type { AlertDecisionEvent, AlertEvent } from "@maekbeat/protocol";
+import type { AlertDecisionEvent, AlertEvent, DeviceSilenceEvent } from "@maekbeat/protocol";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -19,11 +19,27 @@ function alert(overrides: Partial<AlertEvent> = {}): AlertEvent {
   };
 }
 
+function silence(overrides: Partial<DeviceSilenceEvent> = {}): DeviceSilenceEvent {
+  return {
+    alertId: "dev-1:device-silent:1754000100000:1",
+    deviceId: "dev-1",
+    kind: "silence",
+    state: "raised",
+    raisedAtMs: BASE_MS + 100_000,
+    lastFrameAtMs: BASE_MS + 54_000,
+    thresholdMs: 45_000,
+    silentForMs: 46_000,
+    sessionEpoch: 1,
+    ...overrides,
+  };
+}
+
 function timeline(props: Partial<Parameters<typeof AlertTimeline>[0]> = {}) {
   const onDecide = props.onDecide ?? vi.fn();
   render(
     <AlertTimeline
       alerts={props.alerts ?? [alert()]}
+      silence={props.silence ?? []}
       decisions={props.decisions ?? new Map()}
       pending={props.pending ?? new Set()}
       failures={props.failures ?? new Map()}
@@ -182,5 +198,83 @@ describe("AlertTimeline", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Dismiss/ }));
     expect(onDecide).toHaveBeenCalledWith("dev-1:spo2-low:1", "dismissed");
+  });
+});
+
+/*
+ * The chart has drawn gaps as gaps since C11. What it could never do was say
+ * the gap mattered, and these rows are where it does.
+ */
+describe("a silence episode in the timeline", () => {
+  it("names the absence of data rather than borrowing a metric", () => {
+    timeline({ alerts: [], silence: [silence()] });
+
+    const row = screen.getByRole("listitem");
+    expect(row.dataset.alertKind).toBe("silence");
+    expect(row.dataset.alertState).toBe("raised");
+    expect(screen.getByText("no data from device")).toBeDefined();
+    // Not a heart rate, not an SpO2, not a direction — none of those happened.
+    expect(screen.queryByText(/spo2Pct|heartRateBpm|low|high/)).toBeNull();
+    expect(screen.getByText(/threshold 45s/)).toBeDefined();
+  });
+
+  /**
+   * `nowMs` on the device page is the newest frame's receive stamp, which for a
+   * silent device is the moment the silence STARTED. Measuring the gap against
+   * it would render every open episode as zero seconds — the reassuring answer
+   * and the wrong one — so the row takes the server's own count instead.
+   */
+  it("measures its own duration, not the one nowMs would imply", () => {
+    timeline({
+      alerts: [],
+      silence: [silence({ silentForMs: 600_000 })],
+      // Deliberately the raise instant: nowMs cannot help here.
+      nowMs: BASE_MS + 100_000,
+    });
+
+    expect(screen.getByText("10m 00s and counting")).toBeDefined();
+  });
+
+  it("is acknowledged through the same handle as any other episode", () => {
+    const { onDecide } = timeline({ alerts: [], silence: [silence()] });
+
+    fireEvent.click(screen.getByRole("button", { name: /Acknowledge no data from device/ }));
+    expect(onDecide).toHaveBeenCalledWith("dev-1:device-silent:1754000100000:1", "acknowledged");
+  });
+
+  it("interleaves with threshold episodes, newest first", () => {
+    timeline({
+      alerts: [alert({ alertId: "a-old", raisedAtMs: BASE_MS })],
+      silence: [silence({ raisedAtMs: BASE_MS + 100_000 })],
+    });
+
+    const rows = screen.getAllByRole("listitem");
+    expect(rows.map((row) => row.dataset.alertKind)).toEqual(["silence", "threshold"]);
+  });
+
+  it("keeps a decided silence episode out of the orphan list", () => {
+    const episode = silence();
+    const decided: AlertDecisionEvent = {
+      eventId: "e-silence",
+      alertId: episode.alertId,
+      deviceId: "dev-1",
+      decision: "acknowledged",
+      actor: "night-shift",
+      recordedAtMs: BASE_MS + 120_000,
+    };
+    timeline({
+      alerts: [],
+      silence: [episode],
+      decisions: new Map([[episode.alertId, decided]]),
+    });
+
+    expect(screen.queryByText("Decided, alert no longer retained")).toBeNull();
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByText(/Acknowledged by night-shift/)).toBeDefined();
+  });
+
+  it("still says there is nothing to show when both lists are empty", () => {
+    timeline({ alerts: [], silence: [] });
+    expect(screen.getByText("No alerts recorded for this device.")).toBeDefined();
   });
 });

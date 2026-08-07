@@ -1,4 +1,9 @@
-import { alertEventSchema, vitalsFrameSchema, type VitalsFrame } from "@maekbeat/protocol";
+import {
+  alertEventSchema,
+  deviceSilenceEventSchema,
+  vitalsFrameSchema,
+  type VitalsFrame,
+} from "@maekbeat/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ALERT_HISTORY_LIMIT } from "./alerts";
@@ -171,9 +176,19 @@ describe("GET /devices/:deviceId/alerts", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
       deviceId: "rest-dev",
-      counters: { raised: 0, resolved: 0, suppressed: 0, acknowledged: 0, dismissed: 0 },
+      counters: {
+        raised: 0,
+        resolved: 0,
+        suppressed: 0,
+        acknowledged: 0,
+        dismissed: 0,
+        silenceRaised: 0,
+        silenceResolved: 0,
+        silenceForcedEvicted: 0,
+      },
       decisions: [],
       alerts: [],
+      silence: [],
     });
   });
 
@@ -208,6 +223,9 @@ describe("GET /devices/:deviceId/alerts", () => {
       suppressed: 0,
       acknowledged: 0,
       dismissed: 0,
+      silenceRaised: 0,
+      silenceResolved: 0,
+      silenceForcedEvicted: 0,
     });
     expect(body.alerts).toHaveLength(1);
     expect(body.alerts[0]).toMatchObject({
@@ -225,5 +243,46 @@ describe("GET /devices/:deviceId/alerts", () => {
       Object.keys(alertEventSchema.shape).sort(),
     );
     expect(alertEventSchema.safeParse(body.alerts[0]).success).toBe(true);
+  });
+
+  it("serves a silence episode with exactly the protocol's fields (C20a)", async () => {
+    const server = await seededApp();
+    // Sweep the fleet by hand from a clock well past the threshold. The
+    // detector reads the store's last-seen stamps, which seededApp set to
+    // 9_000-odd, so any modern clock puts this device far into silence.
+    const swept = server.silenceDetector.sweep(9_000 + 10 * 60 * 1_000);
+    expect(swept).toHaveLength(1);
+
+    const response = await server.inject({ method: "GET", url: "/devices/rest-dev/alerts" });
+    const body = response.json<{
+      counters: Record<string, number>;
+      silence: Record<string, unknown>[];
+    }>();
+
+    expect(body.counters.silenceRaised).toBe(1);
+    expect(body.silence).toHaveLength(1);
+    expect(body.silence[0]).toMatchObject({
+      deviceId: "rest-dev",
+      kind: "silence",
+      state: "raised",
+      // The store's `lastReceivedAtMs` is the stamp of the frame that arrived
+      // last, not the largest stamp it holds — this fixture ingests 9_002 then
+      // 9_000 then 9_001 on purpose. In production the two are the same thing,
+      // because receive stamps are read from one clock at arrival.
+      lastFrameAtMs: 9_001,
+      thresholdMs: 45_000,
+    });
+
+    // Drift guard, the same one the alert record carries: the REST silence
+    // episode must expose exactly deviceSilenceEventSchema's fields, so a
+    // contract change breaks here rather than in a browser. `resolvedAtMs` is
+    // absent while the episode is open, so it is excluded from both sides.
+    const optional = new Set(["resolvedAtMs"]);
+    expect(Object.keys(body.silence[0] ?? {}).sort()).toEqual(
+      Object.keys(deviceSilenceEventSchema.shape)
+        .filter((key) => !optional.has(key))
+        .sort(),
+    );
+    expect(deviceSilenceEventSchema.safeParse(body.silence[0]).success).toBe(true);
   });
 });

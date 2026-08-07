@@ -1405,3 +1405,70 @@ Every mutation above was applied to a working tree copy, confirmed present in
 the file by grep before the guard was run, and reverted from a file copy rather
 than by `git checkout` — with the guard confirmed green again after each revert.
 None is present in any commit.
+
+## C20a — the alarm on the absence of data
+
+The feature this commit adds is an alarm, so the mutations are asked a question
+the earlier rows are not: does breaking it produce a **silence** in the tests,
+the way the defect produced a silence in the system? Two of the twelve came back
+NOT CAUGHT, and both changed the code rather than the log.
+
+| Guard                                    | Mutation                                                                              | Result     |
+| ---------------------------------------- | ------------------------------------------------------------------------------------- | ---------- |
+| the sweep actually repeats               | `setInterval` → `setTimeout` in `silencePlugin`, so it fires once and never again     | caught     |
+| the threshold clears a working reconnect | `DEVICE_SILENCE_MS_DEFAULT` 45 000 → 30 000, under the gateway's 36 000               | caught     |
+| the clear path                           | `if (false && device.lastReceivedAtMs > open.lastFrameAtMs)` — silence never resolves | caught     |
+| dedupe                                   | push the open episode to `transitions` on every sweep                                 | caught     |
+| the detector cannot move the alerts      | make `sweep` return `[]` before reading the fleet — the whole feature off             | see below  |
+| eviction never takes the open episode    | delete the `closed()` predicate from `evictOne`                                       | NOT CAUGHT |
+| eviction takes the oldest                | `splice(state.episodes.length - 1, 1)` — drop the newest instead                      | caught     |
+| the ordering not chosen                  | clear on `device.sessionEpoch !== open.sessionEpoch` instead of on a frame            | caught     |
+| the monotonic sweep clock                | drop the `Math.max(this.clockMs ?? …, …)` clamp                                       | NOT CAUGHT |
+| a silence row names the absence of data  | `label: "spo2Pct low"` on the timeline row                                            | caught     |
+| a silence row measures its own duration  | `durationMs: 0`, letting `nowMs` decide as a threshold row does                       | caught     |
+| silence is decidable                     | `const raisedBySilence = false` in the decision route                                 | caught     |
+| the hazard citation resolves             | rename the test H4 cites in `silence.test.ts`                                         | caught     |
+
+**The negative control, row five.** Turning the detector off leaves the
+golden-fixture equality test's four comparisons GREEN — identical alert history,
+identical fan-out, identical counters — and that is correct rather than a
+failure: a mechanism that is off cannot change what it observes. What fails is
+the fifth assertion in that file, the one that checks the ON run raised silence
+at all. Without it the equality test would have passed with the whole feature
+deleted, which is the exact shape of the vacuous guard this repository has
+shipped twice before (C12a, C19). The non-vacuity check is written first in the
+file for that reason.
+
+**Row six, NOT CAUGHT, and the code was wrong rather than the test.** `evictOne`
+carried an explicit "never the open episode" clause and removing it broke
+nothing. The setup was suspected first, per the 2026-08-05 amendment, and the
+setup turned out to be right: the clause is unreachable. Episodes sit in raise
+order and at most one is open, so the open one is always the LAST element and
+never the oldest; and eviction runs at exactly one moment, inside `raise`, on an
+alertId minted a few statements earlier that no client can have decided. Neither
+"decided first" nor "oldest first" can select it. So the clause was deleted the
+way `src/stream.ts` deleted a `readyState` check no test could tell from its
+absence, the invariant it was guarding is now asserted directly in
+`src/silence.test.ts`, and the mutation that DOES break that invariant — evicting
+from the wrong end — is row seven, which is caught. Deleting the clause then
+cost one covered function and dropped apps/server under its 98% functions
+threshold, which is how the coverage ratchet pointed at the thing actually
+missing: the silence detector's `onForcedEviction` callback in `src/app.ts`
+had no caller in any test. That is C12a's defect exactly — a bound wired in
+`buildApp` that nothing reaches — and it is why
+`src/silence.integration.test.ts` drives the history past its limit.
+
+**Row nine, NOT CAUGHT, and the tests were looking at the wrong thing.** Two
+clock tests already existed and both survived the clamp's removal, because
+neither observed anything the clamp changes: an episode is only raised when none
+is open, so a stepped-back clock cannot un-raise one, and the resolve stamp has
+its own `Math.max` guard. What the clamp actually defends is narrower and worth
+defending — that an OPEN episode's reported `silentForMs` never shrinks. A
+duration that goes backwards mid-episode is how a caregiver learns not to trust
+the display, and an NTP correction is the ordinary way it happens. The test was
+written to that property and the mutation is caught.
+
+Every mutation above was applied to a working tree copy, run against the named
+suite, and reverted from that copy rather than by `git checkout`, with the suite
+confirmed green again after each revert. `grep -rn MUTATION` over `apps/` and
+`packages/` returns nothing; none is present in any commit.

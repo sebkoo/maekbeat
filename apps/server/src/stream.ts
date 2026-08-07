@@ -1,6 +1,7 @@
 import type {
   AlertDecisionEvent,
   AlertEvent,
+  DeviceSilenceEvent,
   StoredVitalsFrame,
   StreamMessage,
 } from "@maekbeat/protocol";
@@ -55,6 +56,19 @@ export class DeviceBroadcaster {
   /** A decision recorded by one dashboard, sent to every other one (C12). */
   publishDecision(decision: AlertDecisionEvent): void {
     this.publish(decision.deviceId, { type: "decision", decision });
+  }
+
+  /**
+   * A device fell silent, or started sending again (C20a).
+   *
+   * Published from the sweep rather than from ingest, which is the only place
+   * in this class where a message has no frame behind it — that is the whole
+   * feature. A resolve therefore arrives after the frames that ended the
+   * silence, up to one sweep later, because the frame is what proves the
+   * device is back and the sweep is what notices.
+   */
+  publishSilence(silence: DeviceSilenceEvent): void {
+    this.publish(silence.deviceId, { type: "silence", silence });
   }
 
   subscriberCount(deviceId?: string): number {
@@ -167,8 +181,11 @@ export const streamPlugin: FastifyPluginAsync<StreamPluginOptions> = async (app,
         "WebSocket upgrade endpoint, server to dashboard only — the dashboard " +
         "sends nothing and any message it does send is ignored. On subscribe: " +
         "{type:'ready', deviceId, serverTimeMs, ringCapacity}. Then one " +
-        "{type:'frame', frame} per accepted frame (duplicates never reach it) " +
-        "and one {type:'alert', alert} per lifecycle transition, both validated " +
+        "{type:'frame', frame} per accepted frame (duplicates never reach it), " +
+        "one {type:'alert', alert} per lifecycle transition, and one " +
+        "{type:'silence', silence} when the device stops sending for longer " +
+        "than DEVICE_SILENCE_MS or starts again — the one message with no " +
+        "frame behind it. All validated " +
         "by @maekbeat/protocol streamMessageSchema. Subscribing to a device the " +
         "server has not seen yet is allowed and stays quiet until its first " +
         "frame. Plain HTTP requests receive 426.",

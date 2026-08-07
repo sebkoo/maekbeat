@@ -113,6 +113,23 @@ judged not actionable); that distinction is the false-alarm signal the C23
 product loop counts. `actor` is caller-asserted provenance, not an
 authenticated identity — nothing in this system authenticates anything yet.
 
+## Device silence (since C20a)
+
+`deviceSilenceEventSchema` (src/silence.ts) is the fourth additive exercise: a
+new schema and a fifth `streamMessageSchema` member, vitals frame untouched, `v`
+stays `1`.
+
+It is **not** an `alertEventSchema`, and that is the design rather than an
+oversight. A threshold alert is a claim about a value and carries a metric, a
+direction and a window; silence is a claim about the absence of frames and
+carries none of those. `alertMetricSchema` names three vitals, so folding
+silence into the alert record means either widening that enum or picking one of
+the three — and picking one produces a record saying a heart rate crossed a line
+when what happened is that nothing arrived at all. The two share the lifecycle
+(`alertStateSchema`) and the `alertId` format, so one decision route judges
+both, and nothing else. The full trade, including what it costs apps/ios, is
+docs/DECISIONS.md #30.
+
 ## Commands
 
 ```sh

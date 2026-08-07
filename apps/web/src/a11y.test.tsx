@@ -1,4 +1,4 @@
-import type { AlertDecisionEvent } from "@maekbeat/protocol";
+import type { AlertDecisionEvent, DeviceSilenceEvent } from "@maekbeat/protocol";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
@@ -54,6 +54,7 @@ const ALERTS = {
   counters: { raised: 1, resolved: 0, suppressed: 0, acknowledged: 0, dismissed: 0 },
   alerts: [ALERT],
   decisions: [] as AlertDecisionEvent[],
+  silence: [] as DeviceSilenceEvent[],
 };
 
 let streamHandlers: DeviceStreamHandlers | undefined;

@@ -1,4 +1,4 @@
-import type { AlertDecisionEvent, AlertEvent } from "@maekbeat/protocol";
+import type { AlertDecisionEvent, AlertEvent, DeviceSilenceEvent } from "@maekbeat/protocol";
 
 import { AlertStateBadge } from "./AlertStateBadge";
 import { formatInstant } from "../format";
@@ -9,6 +9,19 @@ import { formatInstant } from "../format";
  * is one row with a duration rather than thirty. Alarm fatigue is the design
  * constraint the C21 risk register will cite, and a timeline that counts
  * firings would manufacture exactly the noise the engine exists to avoid.
+ *
+ * Since C20a the list holds two kinds of episode. A threshold alert is a claim
+ * about a value; a silence episode is a claim about the absence of frames, and
+ * the chart's own rule — C11's, that a gap is drawn as a gap and never
+ * interpolated across — has never been able to say that a gap MATTERS. This
+ * row is where it says so.
+ *
+ * They share this list rather than getting a treatment of their own, and that
+ * is a decision. The three states are the same three, so docs/DECISIONS.md #12
+ * already assigns them a word, a mark and a border; what differs is the
+ * subject, and the subject is what the label is for. A second visual language
+ * for a second kind of episode would be one more thing a caregiver has to
+ * learn at the moment they have the least attention to spare.
  */
 
 /** Milliseconds an episode has lasted, or lasted for before it resolved. */
@@ -23,8 +36,60 @@ export function formatDuration(ms: number): string {
   return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
 }
 
+/** One row's worth of episode, whichever kind produced it. */
+interface Episode {
+  kind: "threshold" | "silence";
+  alertId: string;
+  state: AlertEvent["state"];
+  raisedAtMs: number;
+  resolvedAtMs: number | undefined;
+  /** The subject, used verbatim in the row and inside both button names. */
+  label: string;
+  durationMs: number;
+  /** The line under the head: what this episode is evidence of. */
+  detail: string;
+}
+
+/**
+ * A silence episode measures its own duration and does not take `nowMs`.
+ *
+ * `nowMs` on this page is the newest frame's receive stamp, which for a device
+ * that has stopped sending is the moment the silence STARTED — so borrowing it
+ * would render every open silence episode as zero seconds long, the reassuring
+ * answer and the wrong one. The server already counts the gap on the record.
+ */
+function fromSilence(episode: DeviceSilenceEvent): Episode {
+  return {
+    kind: "silence",
+    alertId: episode.alertId,
+    state: episode.state,
+    raisedAtMs: episode.raisedAtMs,
+    resolvedAtMs: episode.resolvedAtMs,
+    label: "no data from device",
+    durationMs: episode.silentForMs,
+    detail:
+      `last frame ${formatInstant(episode.lastFrameAtMs)} · session ${episode.sessionEpoch}` +
+      ` · threshold ${formatDuration(episode.thresholdMs)}`,
+  };
+}
+
+function fromAlert(alert: AlertEvent, nowMs: number): Episode {
+  return {
+    kind: "threshold",
+    alertId: alert.alertId,
+    state: alert.state,
+    raisedAtMs: alert.raisedAtMs,
+    resolvedAtMs: alert.resolvedAtMs,
+    label: `${alert.metric} ${alert.direction}`,
+    durationMs: episodeDurationMs(alert, nowMs),
+    detail: `window min ${alert.windowStats.minValue} · max ${alert.windowStats.maxValue}`,
+  };
+}
+
 export interface AlertTimelineProps {
   alerts: readonly AlertEvent[];
+  /** Episodes of the device sending nothing at all (C20a). */
+  silence: readonly DeviceSilenceEvent[];
   /** Decision in force per alertId, derived from the append-only log. */
   decisions: ReadonlyMap<string, AlertDecisionEvent>;
   /** Alert ids with a decision in flight; their controls are disabled. */
@@ -36,48 +101,60 @@ export interface AlertTimelineProps {
 }
 
 export function AlertTimeline(props: AlertTimelineProps) {
+  // Both kinds into one list, newest first: a caregiver reads the top of it,
+  // and what they need at the top is whatever happened last — not whichever
+  // list it happened to come out of.
+  const episodes = [
+    ...props.alerts.map((alert) => fromAlert(alert, props.nowMs)),
+    ...props.silence.map(fromSilence),
+  ].sort((a, b) => b.raisedAtMs - a.raisedAtMs);
+
   // A decision can outlive the alert it judged: the server's decision log is
   // append-only while its alert history is a bounded cache (docs/DECISIONS.md
   // #15). Those decisions are shown as their own rows rather than dropped —
   // hiding a judgement because its subject was evicted would lose the only
-  // record that anyone triaged the event at all.
-  const retained = new Set(props.alerts.map((alert) => alert.alertId));
+  // record that anyone triaged the event at all. Silence episodes are bounded
+  // too (C20a), so `retained` reads both lists or an acknowledged silent
+  // device would produce a phantom orphan row the moment it was evicted.
+  const retained = new Set(episodes.map((episode) => episode.alertId));
   const orphaned = [...props.decisions.values()]
     .filter((decision) => !retained.has(decision.alertId))
     .sort((a, b) => b.recordedAtMs - a.recordedAtMs);
 
-  if (props.alerts.length === 0 && orphaned.length === 0) {
+  if (episodes.length === 0 && orphaned.length === 0) {
     return <p className="mb-meta">No alerts recorded for this device.</p>;
   }
 
-  // Newest episode first: a caregiver reads the top of this list.
-  const episodes = [...props.alerts].sort((a, b) => b.raisedAtMs - a.raisedAtMs);
-
   return (
     <ol className="mb-timeline">
-      {episodes.map((alert) => {
-        const decision = props.decisions.get(alert.alertId);
-        const failure = props.failures.get(alert.alertId);
-        const busy = props.pending.has(alert.alertId);
-        const duration = formatDuration(episodeDurationMs(alert, props.nowMs));
-        const label = `${alert.metric} ${alert.direction}`;
+      {episodes.map((episode) => {
+        const decision = props.decisions.get(episode.alertId);
+        const failure = props.failures.get(episode.alertId);
+        const busy = props.pending.has(episode.alertId);
+        const duration = formatDuration(episode.durationMs);
+        const label = episode.label;
 
         return (
-          <li className="mb-timeline__row" key={alert.alertId} data-alert-state={alert.state}>
+          <li
+            className="mb-timeline__row"
+            key={episode.alertId}
+            data-alert-state={episode.state}
+            data-alert-kind={episode.kind}
+          >
             <div className="mb-timeline__head">
-              <AlertStateBadge state={alert.state} />
+              <AlertStateBadge state={episode.state} />
               <span className="mb-timeline__metric">{label}</span>
               <span className="mb-timeline__duration">
-                {alert.resolvedAtMs === undefined ? `${duration} and counting` : duration}
+                {episode.resolvedAtMs === undefined ? `${duration} and counting` : duration}
               </span>
             </div>
 
             <p className="mb-timeline__times">
-              raised {formatInstant(alert.raisedAtMs)}
-              {alert.resolvedAtMs === undefined
+              raised {formatInstant(episode.raisedAtMs)}
+              {episode.resolvedAtMs === undefined
                 ? ""
-                : ` · resolved ${formatInstant(alert.resolvedAtMs)}`}{" "}
-              · window min {alert.windowStats.minValue} · max {alert.windowStats.maxValue}
+                : ` · resolved ${formatInstant(episode.resolvedAtMs)}`}{" "}
+              · {episode.detail}
             </p>
 
             {decision === undefined ? (
@@ -91,7 +168,7 @@ export function AlertTimeline(props: AlertTimelineProps) {
                   className="mb-button"
                   aria-label={`Acknowledge ${label} alert`}
                   disabled={busy}
-                  onClick={() => props.onDecide(alert.alertId, "acknowledged")}
+                  onClick={() => props.onDecide(episode.alertId, "acknowledged")}
                 >
                   Acknowledge
                 </button>
@@ -100,7 +177,7 @@ export function AlertTimeline(props: AlertTimelineProps) {
                   className="mb-button mb-button--quiet"
                   aria-label={`Dismiss ${label} alert as not actionable`}
                   disabled={busy}
-                  onClick={() => props.onDecide(alert.alertId, "dismissed")}
+                  onClick={() => props.onDecide(episode.alertId, "dismissed")}
                 >
                   Dismiss
                 </button>

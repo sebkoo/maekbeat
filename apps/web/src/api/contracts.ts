@@ -1,6 +1,7 @@
 import {
   alertDecisionEventSchema,
   alertEventSchema,
+  deviceSilenceEventSchema,
   storedVitalsFrameSchema,
 } from "@maekbeat/protocol";
 import { z } from "zod";
@@ -76,5 +77,11 @@ export const alertsPageSchema = z.object({
   alerts: z.array(alertEventSchema),
   /** The append-only decision log for this device, oldest first (C12). */
   decisions: z.array(alertDecisionEventSchema),
+  /**
+   * Episodes of the device sending nothing at all (C20a). A separate list
+   * because it is a separate record: silence has no metric and no window, so
+   * it is not an `alertEventSchema` and never will be.
+   */
+  silence: z.array(deviceSilenceEventSchema),
 });
 export type AlertsPage = z.infer<typeof alertsPageSchema>;

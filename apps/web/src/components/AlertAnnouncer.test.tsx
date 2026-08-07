@@ -1,4 +1,4 @@
-import type { AlertDecisionEvent, AlertEvent } from "@maekbeat/protocol";
+import type { AlertDecisionEvent, AlertEvent, DeviceSilenceEvent } from "@maekbeat/protocol";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
@@ -122,5 +122,68 @@ describe("AlertAnnouncer", () => {
       <AlertAnnouncer alerts={[]} decisions={new Map([["gone", decision({ alertId: "gone" })]])} />,
     );
     expect(live()).toBe("An alert acknowledged by night-shift");
+  });
+});
+
+/*
+ * "Feed disconnected" is this dashboard losing its socket. A silence episode is
+ * the DEVICE having stopped, which the socket cannot report — from here a calm
+ * patient and a dead link look identical. A screen-reader user has to be able
+ * to tell those two apart from the words alone.
+ */
+describe("device silence", () => {
+  function silence(overrides: Partial<DeviceSilenceEvent> = {}): DeviceSilenceEvent {
+    return {
+      alertId: "s1",
+      deviceId: "dev-1",
+      kind: "silence",
+      state: "raised",
+      raisedAtMs: BASE_MS + 100_000,
+      lastFrameAtMs: BASE_MS + 54_000,
+      thresholdMs: 45_000,
+      silentForMs: 46_000,
+      sessionEpoch: 1,
+      ...overrides,
+    };
+  }
+
+  it("announces the device stopping, and starting again", () => {
+    const { rerender } = render(<AlertAnnouncer alerts={[]} silence={[]} decisions={new Map()} />);
+
+    rerender(<AlertAnnouncer alerts={[]} silence={[silence()]} decisions={new Map()} />);
+    expect(live()).toBe("No data from device");
+
+    rerender(
+      <AlertAnnouncer
+        alerts={[]}
+        silence={[silence({ state: "resolved", resolvedAtMs: BASE_MS + 160_000 })]}
+        decisions={new Map()}
+      />,
+    );
+    expect(live()).toBe("Device sending again");
+  });
+
+  it("says nothing while the episode merely continues", () => {
+    const { rerender } = render(<AlertAnnouncer alerts={[]} silence={[]} decisions={new Map()} />);
+    rerender(<AlertAnnouncer alerts={[]} silence={[silence()]} decisions={new Map()} />);
+    expect(live()).toBe("No data from device");
+
+    // The server re-states an open episode's duration on every sweep. Repeating
+    // it in a live region would be the firehose this component exists to
+    // refuse — so the message must be unchanged, not merely non-empty.
+    rerender(
+      <AlertAnnouncer
+        alerts={[]}
+        silence={[silence({ state: "ongoing", silentForMs: 300_000 })]}
+        decisions={new Map()}
+      />,
+    );
+    expect(live()).toBe("No data from device");
+  });
+
+  it("keeps working for a caller that passes no silence at all", () => {
+    const { rerender } = render(<AlertAnnouncer alerts={[]} decisions={new Map()} />);
+    rerender(<AlertAnnouncer alerts={[alert()]} decisions={new Map()} />);
+    expect(live()).toBe("SpO2 low alert raised");
   });
 });

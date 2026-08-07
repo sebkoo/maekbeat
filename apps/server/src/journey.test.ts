@@ -122,6 +122,9 @@ describe("full journey: vitals-sim -> WS -> ingest -> engine -> REST", () => {
       suppressed: 0,
       acknowledged: 0,
       dismissed: 0,
+      silenceRaised: 0,
+      silenceResolved: 0,
+      silenceForcedEvicted: 0,
     });
     expect(alerts.alerts).toHaveLength(1);
     const alert = alerts.alerts[0] as {

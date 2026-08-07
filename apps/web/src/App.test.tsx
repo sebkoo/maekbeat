@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
-import type { AlertDecisionEvent } from "@maekbeat/protocol";
+import type { AlertDecisionEvent, DeviceSilenceEvent } from "@maekbeat/protocol";
 
 import { App } from "./App";
 import type { DeviceStreamHandlers, MaekbeatApi } from "./api/client";
@@ -76,6 +76,7 @@ const ALERTS = {
   deviceId: "sim-dev-1",
   counters: { raised: 2, resolved: 1, suppressed: 0, acknowledged: 0, dismissed: 0 },
   decisions: [] as AlertDecisionEvent[],
+  silence: [] as DeviceSilenceEvent[],
   alerts: [
     {
       alertId: "sim-dev-1:spo2-low:1",
@@ -352,7 +353,7 @@ describe("device detail", () => {
   it("shows a whole alert lifecycle as one timeline row", async () => {
     renderApp(
       fakeApi({
-        readAlerts: async () => ({ ...ALERTS, alerts: [], decisions: [] }),
+        readAlerts: async () => ({ ...ALERTS, alerts: [], decisions: [], silence: [] }),
       }),
       "/devices/sim-dev-1",
     );
@@ -436,6 +437,7 @@ describe("device detail", () => {
           counters: { raised: 0, resolved: 0, suppressed: 0, acknowledged: 0, dismissed: 0 },
           alerts: [],
           decisions: [],
+          silence: [],
         }),
       }),
       "/devices/sim-dev-1",
