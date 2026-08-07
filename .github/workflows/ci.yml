@@ -316,7 +316,7 @@ jobs:
       # in the build cache instead of the image store, so the `docker image
       # inspect` on the next line would find nothing.
       - id: buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
         with:
           use: false
       # The revision comes from the checked-out tree, and is cross-checked
@@ -389,7 +389,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - id: buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
         with:
           use: false
       - uses: docker/login-action@v4
