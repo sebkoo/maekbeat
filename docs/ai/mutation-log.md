@@ -1738,3 +1738,56 @@ Applied to copies of `StreamClient.swift` and `IngestClient.swift`, reverted
 from those copies rather than by `git checkout`, each revert verified by
 `shasum` against both the copy and `git show HEAD:`, and the suite rebuilt and
 re-run green (5 passed) at the end.
+
+## Phase 6 — the status marker nothing was checking
+
+`scripts/check-phase-status.sh` holds the roadmap heading as the single source
+for a phase's status, propagates it to the README board (R1), and refuses a
+phase marked complete that still lists a row without a `shipped [sha]` (R2).
+The mutations are grouped by which of the two rules, or which fail-open path,
+each one aims at.
+
+| Guard                                | Mutation                                                     | Result |
+| ------------------------------------ | ------------------------------------------------------------ | ------ |
+| R1, board follows heading            | uncheck Phase 6 on the board, roadmap still complete         | caught |
+| R1, in the other direction           | check Phase 7 on the board, roadmap still in progress        | caught |
+| R2, a complete phase has shipped     | Phase 7 complete in BOTH places, C21 and C22 carrying no sha | caught |
+| fail-open, the board anchor          | rename the `## Status` heading                               | caught |
+| fail-open, the board data            | delete every phase row, heading intact                       | caught |
+| fail-open, the roadmap anchor        | rename every `## Phase N —` heading                          | caught |
+| fail-open, an undecided heading      | strip the marker off Phase 6's heading                       | caught |
+| R2's boundary, premature declaration | Phase 7 complete in both places, C21 and C22 bullets deleted | passes |
+
+The third row is the one worth reading twice. It was run with the board changed
+to agree, because R1 fires first and returns before R2 is reached — mutating the
+roadmap alone would have gone red on R1 and proved nothing about R2. The verdict
+is R2's own message naming C21 and C22, not R1's.
+
+The three fail-open rows are the ones that had to go red rather than quiet, and
+each names its reason instead of exiting silently. The middle one is the
+interesting case: the `## Status` heading survives and the rows under it do not,
+so a guard that finds its anchor, loops the rows and compares each would exit 0
+with every claim satisfied because there are no claims. `check-hazard-tests.sh`
+already fails on zero rows and this follows it.
+
+The last row passes, and it is recorded as a boundary rather than a gap. R2 asks
+whether the rows a phase lists have shipped, so deleting the unshipped bullets
+and then declaring the phase complete satisfies it. **R2 catches a regression —
+a listed row that has not shipped — and not a premature declaration whose
+remaining work was never written down.** The judgement that a phase is finished
+stays human, and no rule here replaces it.
+
+One more, against the wiring rather than the guard. The check that
+`.github/workflows/ci.yml` invokes this script parses the YAML and reads the
+`hygiene` job's `run` values, and its first version tested for the substring and
+for an unanchored regex — two assertions agreeing with each other and sharing one
+blind spot. Rewritten to `/^\s*bash scripts\/check-phase-status\.sh/m`, and both
+halves proved: commenting the invocation out inside a `run: |` block leaves the
+substring and unanchored tests reporting **true** on a disabled guard, while the
+anchored one reports false. Commenting out a single-line `- run:` step is a
+different case and was checked too — it removes the step from `steps` entirely,
+so all three report false.
+
+Applied to copies of `README.md` and `docs/ROADMAP.md`, reverted from those
+copies rather than by `git checkout`, each revert verified by `shasum` and by
+re-running the guard green.

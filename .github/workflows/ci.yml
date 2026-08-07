@@ -50,6 +50,14 @@ jobs:
       # rots because nothing connects it to the system it describes; this is
       # the connection, and it is why C20 is engineering rather than paperwork.
       - run: bash scripts/check-hazard-tests.sh
+      # The phase status marker, which every neighbouring claim on the board is
+      # checked against and which nothing checked itself. Phase 6 stayed "(in
+      # progress)" on the roadmap and unchecked on the README while the row read
+      # "C19, closed." and every bullet under it said shipped. Whether a phase is
+      # finished is a judgement and stays in the roadmap heading; this propagates
+      # that one value to the board and refuses a complete phase holding a row
+      # with no shipped sha.
+      - run: bash scripts/check-phase-status.sh
 
   # Proves the workspace packages pass their vitest suites and typechecks (first package: C1).
   # Since C9 the suites run once, coverage-enabled: each package's vitest.config.ts
