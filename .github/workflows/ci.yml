@@ -191,7 +191,7 @@ jobs:
       # cache key is the resolved Playwright version rather than the lockfile.
       - id: playwright-version
         run: echo "version=$(pnpm --filter @maekbeat/web exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
