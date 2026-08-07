@@ -3,7 +3,7 @@ import { loadConfig, REQUIRED_PRODUCTION_ENV } from "@maekbeat/server/config";
 import { STREAM_HEARTBEAT_MS_DEFAULT } from "@maekbeat/server/stream";
 import { App, type Duration } from "aws-cdk-lib";
 import { Template } from "aws-cdk-lib/assertions";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import { ALB_IDLE_TIMEOUT, MaekbeatStack, SERVER_PORT } from "./stack";
 
@@ -32,6 +32,29 @@ function synth(): Template {
   );
 }
 
+/**
+ * Synthesized once, in a hook, and read by every test below.
+ *
+ * Not a speed optimisation — a correctness one about where the cost is
+ * charged. The first `Template.fromStack` in a worker process pays for the
+ * whole of CDK's synthesis machinery warming up and costs 1.3-1.8 s on the
+ * machine this was written on and 5.6-6.1 s on a two-core CI runner with four
+ * other packages' vitest processes beside it; every synth after it in the same
+ * process costs 45-50 ms. Left inside a test body, that one-off landed on
+ * whichever test happened to run first and blew vitest's 5 s per-test default
+ * on CI while passing locally — a red build whose cause was construction, not
+ * the assertion the test names.
+ *
+ * A `Template` is a read-only view over synthesized JSON, so sharing one across
+ * tests shares no mutable state. The tests that genuinely need a different
+ * stack build their own.
+ */
+let template: Template;
+
+beforeAll(() => {
+  template = synth();
+});
+
 /** The one container definition, or a failure that says so. */
 function container(template: Template): Record<string, unknown> {
   const definitions = Object.values(template.findResources("AWS::ECS::TaskDefinition"));
@@ -56,7 +79,6 @@ function soleResource(template: Template, type: string): Record<string, unknown>
 
 describe("the stack synthesizes", () => {
   it("produces a template with the resources the compose stack has counterparts for", () => {
-    const template = synth();
     // Not a count of every resource — CDK creates subnets and route tables by
     // the handful and pinning those would be pinning the CDK version. These
     // are the ones a reader of infra/compose.yaml would look for.
@@ -82,7 +104,7 @@ describe("the stack synthesizes", () => {
     // holds the apps/web bundle that infra/web.Dockerfile builds today. What
     // is asserted about S3 instead is that there is exactly one bucket, above.
     const types = new Set(
-      Object.values(synth().toJSON().Resources as Record<string, { Type: string }>).map(
+      Object.values(template.toJSON().Resources as Record<string, { Type: string }>).map(
         (r) => r.Type,
       ),
     );
@@ -111,7 +133,7 @@ describe("the required-environment contract", () => {
     // apps/server/src/config.ts drives its own startup check from. A variable
     // added there and not wired into the task definition fails here, which is
     // the only place in this repository where the two can be compared.
-    const env = environment(synth());
+    const env = environment(template);
     for (const name of Object.keys(REQUIRED_PRODUCTION_ENV)) {
       expect(env.has(name), `${name} is required in production and not in the task`).toBe(true);
       expect(env.get(name)).not.toBe("");
@@ -124,7 +146,7 @@ describe("the required-environment contract", () => {
     // values cannot be checked this way — CORS_ORIGIN is not a string until
     // deploy time — so it is given a concrete stand-in of the shape the stack
     // produces, and the identity of the real one is asserted separately below.
-    const env = environment(synth());
+    const env = environment(template);
     const literals: Record<string, string> = { NODE_ENV: "production" };
     for (const [name, value] of env) {
       if (typeof value === "string") literals[name] = value;
@@ -138,7 +160,6 @@ describe("the required-environment contract", () => {
 
 describe("websocket survival", () => {
   it("gives the load balancer an idle timeout longer than the server's heartbeat", () => {
-    const template = synth();
     // Both numbers come out of the template. The heartbeat the container is
     // actually configured with, not the default the server would have used:
     // a task that overrode STREAM_HEARTBEAT_MS upward past the idle timeout
@@ -166,7 +187,7 @@ describe("websocket survival", () => {
     // A fan-out socket is long-lived by design. Draining for longer than
     // apps/server takes to close its peers would hold a deploy open on
     // connections the server already let go; draining for less would cut them.
-    const properties = soleResource(template(), "AWS::ElasticLoadBalancingV2::TargetGroup");
+    const properties = soleResource(template, "AWS::ElasticLoadBalancingV2::TargetGroup");
     const attributes = properties.TargetGroupAttributes as { Key: string; Value: string }[];
     const delay = attributes.find((a) => a.Key === "deregistration_delay.timeout_seconds");
     expect(Number(delay?.Value)).toBe(10);
@@ -175,7 +196,6 @@ describe("websocket survival", () => {
 
 describe("the health check", () => {
   it("probes a path a real apps/server answers with the code it expects", async () => {
-    const template = synth();
     const properties = soleResource(template, "AWS::ElasticLoadBalancingV2::TargetGroup");
     const path = properties.HealthCheckPath as string;
     const expected = Number((properties.Matcher as { HttpCode: string }).HttpCode);
@@ -196,7 +216,6 @@ describe("the health check", () => {
   });
 
   it("probes the port the container listens on", () => {
-    const template = synth();
     expect(soleResource(template, "AWS::ElasticLoadBalancingV2::TargetGroup").Port).toBe(
       SERVER_PORT,
     );
@@ -207,7 +226,6 @@ describe("the health check", () => {
 
 describe("the dashboard origin", () => {
   it("sets CORS_ORIGIN to the distribution this stack creates, by reference", () => {
-    const template = synth();
     const distributionId = Object.keys(template.findResources("AWS::CloudFront::Distribution"))[0];
     expect(distributionId).toBeDefined();
 
@@ -228,7 +246,6 @@ describe("the dashboard origin", () => {
     // never-crossed origin rebuilt one layer up. The listener is therefore
     // HTTPS with a certificate, and there is no port 80 listener for a request
     // that could not be made.
-    const template = synth();
     const distribution = soleResource(template, "AWS::CloudFront::Distribution");
     const config = distribution.DistributionConfig as {
       DefaultCacheBehavior: { ViewerProtocolPolicy: string };
@@ -249,13 +266,12 @@ describe("the dashboard origin", () => {
     // `*` would make every origin assertion in this file unfalsifiable, which
     // is the argument docs/DECISIONS.md #21 already makes for the compose
     // stack: an allowlist nobody can break is an allowlist that proves nothing.
-    expect(environment(synth()).get("CORS_ORIGIN")).not.toBe("*");
+    expect(environment(template).get("CORS_ORIGIN")).not.toBe("*");
   });
 });
 
 describe("the image", () => {
   it("comes from the repository this stack owns, tagged with the revision it reports", () => {
-    const template = synth();
     const repositoryId = Object.keys(template.findResources("AWS::ECR::Repository"))[0];
     expect(repositoryId).toBeDefined();
 
@@ -279,7 +295,7 @@ describe("the image", () => {
   it("cannot have its tag moved out from under a running task", () => {
     // An image tag that can be repointed is a tag that cannot answer "which
     // commit is this", which is the whole of the C19 identity proof.
-    expect(soleResource(synth(), "AWS::ECR::Repository").ImageTagMutability).toBe("IMMUTABLE");
+    expect(soleResource(template, "AWS::ECR::Repository").ImageTagMutability).toBe("IMMUTABLE");
   });
 });
 
@@ -290,7 +306,6 @@ describe("tracing", () => {
     // set, and an endpoint pointing at nothing is worse than tracing switched
     // off: it looks configured, and the operator spends the incident hunting
     // for spans that were never exported.
-    const template = synth();
     const endpoint = environment(template).get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT");
     if (endpoint === undefined) {
       expect(endpoint).toBeUndefined();
@@ -319,11 +334,6 @@ describe("the idle-timeout constant", () => {
   });
 });
 
-/** Kept separate so the deregistration test above reads in one line. */
-function template(): Template {
-  return synth();
-}
-
 describe("the service runs one task", () => {
   it("does not scale out a server that keeps all of its state in process", () => {
     // The assertion most likely to look like a mistake and least likely to be
@@ -338,7 +348,7 @@ describe("the service runs one task", () => {
     // before that lands is the single change to this stack that would turn a
     // working system into a broken one with nothing else in the template
     // looking wrong.
-    const service = soleResource(synth(), "AWS::ECS::Service");
+    const service = soleResource(template, "AWS::ECS::Service");
     expect(service.DesiredCount).toBe(1);
 
     // And the deploy must not do transiently what the count forbids: a rolling

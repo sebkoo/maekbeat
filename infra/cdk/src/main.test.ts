@@ -22,6 +22,16 @@ const CERT_ARN =
 const ENV = { BUILD_REVISION: REVISION, API_CERTIFICATE_ARN: CERT_ARN };
 
 let buildCdkApp: (env?: NodeJS.ProcessEnv) => import("aws-cdk-lib").App;
+/**
+ * The one synthesis this file needs, done in the hook with the import.
+ *
+ * The first `Template.fromStack` in a worker process pays for CDK's synthesis
+ * machinery warming up — 1.3-1.8 s on the machine this was written on, 5.6-6.1 s
+ * on a two-core CI runner — while every one after it costs 45-50 ms. Charged to
+ * a test body it timed out against the per-test budget on CI and passed here;
+ * src/stack.test.ts carries the measurements.
+ */
+let template: Template;
 
 beforeAll(async () => {
   // The module calls buildCdkApp() at its top level, because that call is what
@@ -30,7 +40,15 @@ beforeAll(async () => {
   process.env.BUILD_REVISION = REVISION;
   process.env.API_CERTIFICATE_ARN = CERT_ARN;
   ({ buildCdkApp } = await import("./main"));
+  template = Template.fromStack(stackOf(buildCdkApp(ENV)));
 });
+
+/** The one stack an app built here holds, or a failure that says otherwise. */
+function stackOf(app: import("aws-cdk-lib").App): never {
+  const stacks = app.node.children.filter((c) => c.node.id === "Maekbeat");
+  expect(stacks).toHaveLength(1);
+  return stacks[0] as never;
+}
 
 describe("buildCdkApp", () => {
   it("refuses to synthesize without a revision, naming it", () => {
@@ -47,10 +65,6 @@ describe("buildCdkApp", () => {
   });
 
   it("builds one stack, from the values it was given", () => {
-    const app = buildCdkApp(ENV);
-    const stacks = app.node.children.filter((c) => c.node.id === "Maekbeat");
-    expect(stacks).toHaveLength(1);
-    const template = Template.fromStack(stacks[0] as never);
     const containers = Object.values(template.findResources("AWS::ECS::TaskDefinition")).flatMap(
       (d) =>
         (
@@ -69,11 +83,29 @@ describe("buildCdkApp", () => {
     // downstream ever sees, and `cdk synth` would emit a template no rule had
     // read.
     const app = buildCdkApp(ENV);
-    // `Validations` has no read side — addPlugins only writes — so the
-    // registered set is read through Stage's older accessor, which is the one
-    // public way to ask. Deprecated, and used here rather than reaching into a
-    // private field, because a test that reads `_policyValidation` breaks
-    // silently the day CDK renames it.
+    // RESIDUAL, and the reason it is written here rather than fixed: this read
+    // is the only public one, and it is deprecated.
+    //
+    // src/main.ts REGISTERS through the current API — `Validations.of(app)
+    // .addPlugins(...)` — so the security gate itself is not at risk. What is
+    // deprecated is asking which plugins are registered. `Validations` has no
+    // read side at all (aws-cdk-lib 2.263.0 exposes only addPlugins,
+    // acknowledge, addWarning and addError), so the only public way to ask is
+    // `Stage#policyValidationBeta1`, which prints "This API will be removed in
+    // the next major release" on every run of this file.
+    //
+    // Its own deprecation notice names `Validations.of(stage).plugins` as the
+    // replacement, and that accessor does not exist in 2.263.0 — absent from
+    // both the type definitions and the runtime, checked rather than assumed.
+    // So there is currently no supported way to write this assertion.
+    //
+    // What breaks on aws-cdk-lib v3 is therefore this test, not the gate: the
+    // pack would still be registered and would still fail synth, and the only
+    // thing lost is the proof that src/main.ts wires it — which is exactly the
+    // C17-shaped hole this test exists to close. The two options on that day
+    // are `Validations.of(stage).plugins` if it has shipped by then, or
+    // replacing the read with a behavioural check that synthesizes a stack with
+    // the acknowledgements withheld and asserts the synth fails.
     //
     // Matched on the pack's own `name` rather than with `instanceof`: CDK
     // stores plugins through a jsii boundary that hands back a structural
@@ -90,8 +122,7 @@ describe("buildCdkApp", () => {
     // fails synth on ten findings, and one wired to acknowledgements that were
     // never applied passes on none of them.
     const app = buildCdkApp(ENV);
-    const stack = app.node.children.find((c) => c.node.id === "Maekbeat");
-    const report = new AwsSolutionsChecks(app, {}).validateScope(stack as never);
+    const report = new AwsSolutionsChecks(app, {}).validateScope(stackOf(app));
     expect(report.violations.map((v) => v.ruleName)).toEqual([]);
     expect(ACKNOWLEDGED.length).toBeGreaterThan(0);
   });

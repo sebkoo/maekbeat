@@ -1113,3 +1113,37 @@ One guard was written and deleted before commit, on the C19 precedent. The
 the correct object — CDK stores validation plugins across a jsii boundary and
 hands back a structural proxy — so it was replaced with a match on the pack's
 own `name`, read off a fresh instance rather than typed as a string.
+
+## C19 — a budget that fits the runner it runs on
+
+| Guard                                | Mutation                                                                 | Result |
+| ------------------------------------ | ------------------------------------------------------------------------ | ------ |
+| the cold synth is out of test bodies | put it back, with the budget scaled to this machine (1200 ms)            | caught |
+| part 1 alone, at CI's defaults       | hoisted, budgets scaled to CI's own 5 s / 10 s defaults (1480 / 2960 ms) | passes |
+| the hook budget bites                | `hookTimeout` just under this machine's cold synth                       | caught |
+| the test budget bites                | `testTimeout` under the one test that builds a real apps/server          | caught |
+
+Three tests died on CI at vitest's 5 s per-test default and every one of them
+was the first full `Template.fromStack` in its file. Nothing hung: the work is
+synchronous CPU, which is also why the reported durations exceed the timeout —
+vitest cannot interrupt it, so 6137 ms is very nearly the real cost of one cold
+synth on a two-core runner with four other packages' vitest processes beside it.
+Locally the same synth is 1.34-1.82 s and fitted under the default, which is the
+whole reason it landed.
+
+The first mutation reproduces the CI failure here by scaling the budget instead
+of the machine: with the synths back in their test bodies and `testTimeout` at
+1200 ms, the same four tests fail with the same message. **A failure you can
+only observe on the runner is a failure you cannot iterate on.**
+
+The second is the one worth reporting. With the synths hoisted and both budgets
+set to CI's own defaults scaled by the measured CI:local ratio, all 28 pass — so
+**part 1 alone would have been sufficient and part 2 is belt-and-braces.** The
+qualification is that it would have passed with 1.6-2.2x headroom on the hook,
+against a runner whose throughput this repository has already recorded as
+depending on what else is on the host (docs/DECISIONS.md #24). Sufficient is not
+the same as sized, which is what part 2 buys.
+
+The third has a failure signature worth knowing: a hook that times out reports
+28 skipped rather than 28 failed. A run that says "skipped" is not a run that
+passed, and the distinction is easy to miss when scanning a log.

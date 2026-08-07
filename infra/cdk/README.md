@@ -98,7 +98,18 @@ read the diff.
 `src/main.test.ts` asserts what the entry point wires, because every other suite
 here builds its own app and rule pack and would stay green if `cdk synth`
 registered neither. That is the shape of the C12a, C12 and C17 defects, three
-times over.
+times over. It carries one named residual: the registration uses the current
+`Validations.of(app).addPlugins()` API, but asking which plugins are registered
+has no supported read — `Stage#policyValidationBeta1` is the only public one and
+is deprecated, and the `Validations.of(stage).plugins` its notice names does not
+exist in aws-cdk-lib 2.263.0. On v3 the gate keeps working and this proof of its
+wiring is what breaks; the alternatives are recorded beside the assertion.
+
+Every cold synthesis in this package happens in a `beforeAll`, and
+`vitest.config.ts` carries a measured timeout budget beside the numbers it was
+derived from. Both exist because the first `Template.fromStack` in a worker
+process costs 1.3-1.8 s here and up to 6.1 s on a two-core CI runner, while
+every synth after it costs 45-50 ms.
 
 ## cdk-nag
 

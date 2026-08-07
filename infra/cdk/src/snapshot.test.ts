@@ -1,6 +1,6 @@
 import { App } from "aws-cdk-lib";
 import { Template } from "aws-cdk-lib/assertions";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import { MaekbeatStack } from "./stack";
 
@@ -22,18 +22,25 @@ import { MaekbeatStack } from "./stack";
  * read the diff before committing it.
  */
 
+// Synthesized in a hook rather than in the test body, so the per-test budget
+// covers the comparison and not CDK's one-off warm-up — see src/stack.test.ts
+// for the measurements. Fixed inputs, because a snapshot of a template built
+// from `git rev-parse HEAD` would change on every commit and teach everyone to
+// update it without looking.
+let template: Template;
+
+beforeAll(() => {
+  template = Template.fromStack(
+    new MaekbeatStack(new App(), "Maekbeat", {
+      revision: "0f1e2d3c4b5a69788796a5b4c3d2e1f0deadbeef",
+      apiCertificateArn:
+        "arn:aws:acm:eu-west-1:111122223333:certificate/11111111-2222-3333-4444-555555555555",
+    }),
+  );
+});
+
 describe("the synthesized template", () => {
   it("matches the pinned snapshot", () => {
-    // Fixed inputs, because a snapshot of a template built from `git rev-parse
-    // HEAD` would change on every commit and teach everyone to update it
-    // without looking.
-    const template = Template.fromStack(
-      new MaekbeatStack(new App(), "Maekbeat", {
-        revision: "0f1e2d3c4b5a69788796a5b4c3d2e1f0deadbeef",
-        apiCertificateArn:
-          "arn:aws:acm:eu-west-1:111122223333:certificate/11111111-2222-3333-4444-555555555555",
-      }),
-    );
     expect(template.toJSON()).toMatchSnapshot();
   });
 });
