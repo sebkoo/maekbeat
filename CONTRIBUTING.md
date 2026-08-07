@@ -21,6 +21,11 @@ cd maekbeat
 - One feature per commit — split unrelated changes.
 - The `commit-msg` hook rejects AI attribution trailers. Disclosure of AI
   assistance lives in `docs/ai/AI_USAGE.md`, not in commit metadata.
+- A roadmap row is one capability, and one that cannot be described in a single
+  reader-facing sentence is two rows (`docs/ROADMAP.md`, "What a row is"). The
+  README status board carries one chip per row and never one per commit;
+  `scripts/check-commit-links.sh` enforces that, and the roadmap is where
+  commit-level detail belongs.
 
 ## Hooks
 

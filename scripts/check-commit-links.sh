@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Every landed commit is linked, and every link points at a real ancestor.
+# Every landed row is linked, and every link points at real ancestors.
 #
 # Two facts made the board rot. A commit cannot contain its own hash, so a link
 # is always added by a later commit; and the C18 and C19 briefs said to leave
@@ -15,6 +15,14 @@
 # script names the offender rather than counting them silently. If you are
 # staring at "the newest entry may be linkless, this one is not the newest",
 # the fix is to backfill the older row, not to add a second exemption.
+#
+# ONE CHIP PER ROW, NEVER ONE PER COMMIT (docs/ROADMAP.md, "What a row is").
+# A row that is one commit gets a commit link. A row that holds several gets a
+# compare link across its range, and then this script checks the range rather
+# than trusting it: every commit the roadmap lists under that row must be inside
+# it, and no other row's commit may be. A range can be wrong by being too narrow
+# — quietly dropping the last commits of a row — as easily as by pointing
+# somewhere else entirely, and neither shows on the rendered page.
 #
 # docs/ROADMAP.md is the plan of record, so the set of landed commits is read
 # from it rather than from the README — that way the board cannot claim
@@ -45,6 +53,11 @@ PLAN=docs/ROADMAP.md
 # "Nothing shipped was affected" in the C18/C19 ordering note — is not read as
 # an entry.
 SHIPPED_RE='^ *- C[0-9]+[a-z]?[,: ].*shipped'
+# An entry's OWN link, which is the one right after the word: "— shipped [sha]".
+# Not just any commit link on the line — several entries link neighbouring
+# commits inline in their prose, and testing for those would call an entry
+# linked because it mentions somebody else's hash.
+OWN_LINK_RE='shipped \[[0-9a-f]{7,40}\]'
 
 # ---------------------------------------------------------------------------
 # 1. Every SHA either file links is a commit, and an ancestor of HEAD.
@@ -52,8 +65,14 @@ SHIPPED_RE='^ *- C[0-9]+[a-z]?[,: ].*shipped'
 # Well-formed is not the same as real: a transposed hex digit still matches the
 # URL shape, and a SHA from an abandoned branch still resolves locally. Only
 # ancestry proves the commit is on the line of history this checkout is on.
+# Both halves of a compare link are collected here, so a broken range end is
+# caught by exactly the same test as a broken commit chip.
 # ---------------------------------------------------------------------------
-linked_shas=$(grep -ohE 'maekbeat/commit/[0-9a-f]{7,40}' "$BOARD" "$PLAN" | cut -d/ -f3 | sort -u)
+commit_links=$(grep -ohE 'maekbeat/commit/[0-9a-f]{7,40}' "$BOARD" "$PLAN" | cut -d/ -f3)
+compare_links=$(grep -ohE 'maekbeat/compare/[0-9a-f]{7,40}\.\.\.[0-9a-f]{7,40}' "$BOARD" "$PLAN" | cut -d/ -f3)
+compare_shas=$(printf '%s\n' "$compare_links" | sed 's/\.\.\./ /' | tr ' ' '\n' | grep -E '^[0-9a-f]{7,40}$')
+linked_shas=$(printf '%s\n%s\n' "$commit_links" "$compare_shas" | grep -E '^[0-9a-f]{7,40}$' | sort -u)
+
 if [ -z "$linked_shas" ]; then
   fail "neither $BOARD nor $PLAN links a single commit; this check would pass vacuously"
 fi
@@ -66,7 +85,25 @@ for sha in $linked_shas; do
 done
 
 # ---------------------------------------------------------------------------
-# 2. Every shipped roadmap entry carries a link, bar the newest.
+# 2. Every compare range runs forwards and spans something.
+#
+# base...head with the two reversed renders a page, resolves both SHAs, and
+# passes every ancestry test above while showing no commits at all. Ordering is
+# the only thing that distinguishes it.
+# ---------------------------------------------------------------------------
+for range in $compare_links; do
+  base=${range%%...*}
+  head=${range##*...}
+  git cat-file -e "${base}^{commit}" 2>/dev/null && git cat-file -e "${head}^{commit}" 2>/dev/null || continue
+  if ! git merge-base --is-ancestor "$base" "$head" 2>/dev/null; then
+    fail "compare range $base...$head runs backwards; $base is not an ancestor of $head"
+  elif [ "$(git rev-parse "$base")" = "$(git rev-parse "$head")" ]; then
+    fail "compare range $base...$head is empty; both ends are the same commit"
+  fi
+done
+
+# ---------------------------------------------------------------------------
+# 3. Every shipped roadmap entry carries a link, bar the newest.
 # ---------------------------------------------------------------------------
 shipped_total=$(grep -cE "$SHIPPED_RE" "$PLAN")
 if [ "$shipped_total" -eq 0 ]; then
@@ -78,7 +115,23 @@ fi
 newest_line=$(grep -nE "$SHIPPED_RE" "$PLAN" | tail -1 | cut -d: -f1)
 newest_commit=$(sed -n "${newest_line}p" "$PLAN" | grep -oE 'C[0-9]+[a-z]?' | head -1)
 
-unlinked=$(grep -nE "$SHIPPED_RE" "$PLAN" | grep -v 'maekbeat/commit/' | cut -d: -f1)
+# The board's exemption is narrower than the roadmap's, and the difference is
+# the whole reason the lag exists. A row goes linkless for exactly one commit
+# because that commit cannot contain its own hash. The moment the roadmap entry
+# carries a link, the hash is known and the board has no excuse left — so the
+# board is exempt only while the newest roadmap entry is itself linkless.
+#
+# Written the obvious way, this was a hole: with C19 both the newest row and a
+# row eleven linked commits deep, deleting its chip from the board passed,
+# because "the newest row may be linkless" matched a row that had been landed
+# for days. Caught by mutation, not by reading.
+if sed -n "${newest_line}p" "$PLAN" | grep -qE "$OWN_LINK_RE"; then
+  board_exempt=""
+else
+  board_exempt="$newest_commit"
+fi
+
+unlinked=$(grep -nE "$SHIPPED_RE" "$PLAN" | grep -vE "$OWN_LINK_RE" | cut -d: -f1)
 for line in $unlinked; do
   entry=$(sed -n "${line}p" "$PLAN" | grep -oE 'C[0-9]+[a-z]?' | head -1)
   if [ "$line" = "$newest_line" ]; then
@@ -89,35 +142,76 @@ for line in $unlinked; do
 done
 
 # ---------------------------------------------------------------------------
-# 3. The board links every commit the plan calls shipped.
+# 4. The board names no shipped row outside a link, and every compare range it
+#    uses covers exactly the row it claims to.
 #
 # Only the Commits column is read. The Phase and Ships columns mention commit
 # numbers as prose — "application code intentionally starts at C1" — and
 # demanding a link there would be demanding one for a sentence.
 # ---------------------------------------------------------------------------
 board_unlinked=""
+board_rows=0
 while IFS= read -r row; do
+  board_rows=$((board_rows + 1))
   # Field 5, because a leading pipe makes field 1 empty: | Phase | Ships | Status | Commits |
   commits=$(printf '%s\n' "$row" | awk -F'|' '{print $5}')
-  # Strip every markdown link, then anything left naming a commit is bare text.
+
+  # 4a. Strip every markdown link; anything left naming a shipped row is a chip
+  #     somebody wrote as plain text.
   bare=$(printf '%s\n' "$commits" | sed -E 's/\[[^]]*\]\([^)]*\)//g')
   for token in $(printf '%s\n' "$bare" | grep -oE 'C[0-9]+[a-z]?' | sort -u); do
     if grep -qE "^ *- ${token}[,: ].*shipped" "$PLAN"; then
       board_unlinked="$board_unlinked $token"
     fi
   done
+
+  # 4b. Each compare chip must span its row exactly. The label has to name the
+  #     row, because otherwise there is nothing to check the range against —
+  #     an unlabelled range is the exemption this whole section exists to deny.
+  while IFS= read -r chip; do
+    [ -n "$chip" ] || continue
+    label=$(printf '%s' "$chip" | sed -E 's/^\[([^]]*)\].*/\1/')
+    range=$(printf '%s' "$chip" | sed -E 's|.*compare/([0-9a-f]+\.\.\.[0-9a-f]+)\).*|\1|')
+    token=$(printf '%s' "$label" | grep -oE 'C[0-9]+[a-z]?' | head -1)
+    base=${range%%...*}
+    head=${range##*...}
+    if [ -z "$token" ]; then
+      fail "$BOARD has a compare chip labelled \"$label\" naming no roadmap row, so nothing can check what it covers"
+      continue
+    fi
+    git cat-file -e "${base}^{commit}" 2>/dev/null && git cat-file -e "${head}^{commit}" 2>/dev/null || continue
+    git merge-base --is-ancestor "$base" "$head" 2>/dev/null || continue
+    inside=$(git rev-list "$base..$head")
+
+    # Not too narrow: every commit the roadmap lists under this row is in range.
+    for sha in $(grep -E "^ *- ${token}[,: ]" "$PLAN" | grep -ohE 'maekbeat/commit/[0-9a-f]{7,40}' | cut -d/ -f3 | sort -u); do
+      full=$(git rev-parse "$sha" 2>/dev/null) || continue
+      printf '%s\n' "$inside" | grep -q "^${full}$" ||
+        fail "$BOARD spans $token as $range, which does not contain $sha — the roadmap lists it under $token"
+    done
+
+    # Not too wide: no other row's own commit may fall inside the range.
+    while IFS= read -r entry; do
+      other=$(printf '%s' "$entry" | grep -oE 'C[0-9]+[a-z]?' | head -1)
+      [ "$other" = "$token" ] && continue
+      sha=$(printf '%s' "$entry" | grep -ohE 'maekbeat/commit/[0-9a-f]{7,40}' | head -1 | cut -d/ -f3)
+      [ -n "$sha" ] || continue
+      full=$(git rev-parse "$sha" 2>/dev/null) || continue
+      printf '%s\n' "$inside" | grep -q "^${full}$" &&
+        fail "$BOARD spans $token as $range, which also swallows $other ($sha) — that row has its own chip"
+    done < <(grep -E "$SHIPPED_RE" "$PLAN")
+  done < <(printf '%s\n' "$commits" | grep -oE '\[[^]]*\]\([^)]*compare/[0-9a-f]{7,40}\.\.\.[0-9a-f]{7,40}\)')
 done < <(grep -E '^\| [0-9] — ' "$BOARD")
 
 for token in $board_unlinked; do
-  if [ "$token" = "$newest_commit" ]; then
-    note "$BOARD names $token unlinked; it is the newest entry, so this is allowed once"
+  if [ -n "$board_exempt" ] && [ "$token" = "$board_exempt" ]; then
+    note "$BOARD names $token unlinked; its roadmap entry is linkless too, so this is the one allowed lag"
   else
     fail "$BOARD names $token in its Commits column with no link, and $token has shipped"
   fi
 done
 
 # Guard against the guard reading nothing: the board must have rows to read.
-board_rows=$(grep -cE '^\| [0-9] — ' "$BOARD")
 if [ "$board_rows" -lt 8 ]; then
   fail "read only $board_rows status rows from $BOARD; the table shape has changed"
 fi
@@ -126,4 +220,4 @@ if [ "$failures" -gt 0 ]; then
   note "$failures problem(s)."
   exit 1
 fi
-note "$shipped_total shipped entries, $board_rows board rows, $(printf '%s\n' "$linked_shas" | wc -l | tr -d ' ') linked commits — all resolve to ancestors of HEAD."
+note "$shipped_total shipped entries, $board_rows board rows, $(printf '%s\n' "$linked_shas" | wc -l | tr -d ' ') linked commits, $(printf '%s\n' "$compare_links" | grep -c .) compare range(s) — all resolve to ancestors of HEAD."

@@ -1188,3 +1188,46 @@ links asked for; C0, C9, C15 and C16 were also unlinked in docs/ROADMAP.md
 while the README already carried chips for three of them, so the two files
 disagreed about what had shipped. Backfilling only what was asked for would
 have left the new guard red on its own first run.
+
+## C19 — one chip per row, and the exemption that swallowed a regression
+
+| Guard                               | Mutation                                                    | Result |
+| ----------------------------------- | ----------------------------------------------------------- | ------ |
+| compare ends are real ancestors     | base to a real non-ancestor; base to a non-commit           | caught |
+| compare ends are real ancestors     | head to a real non-ancestor; head to a non-commit           | caught |
+| a range runs forwards               | reverse the two ends                                        | caught |
+| a range spans something             | both ends the same commit                                   | caught |
+| a range is not too narrow           | stop it at the k6 commit, dropping the last five            | caught |
+| a range is not too wide             | start it at C17's tip, swallowing C18                       | caught |
+| a range can be checked at all       | relabel the chip so it names no roadmap row                 | caught |
+| the board links every landed row    | delete the compare chip's link; delete a single-commit chip | caught |
+| the one-commit lag is still allowed | roadmap entry and board chip both linkless                  | passes |
+
+**The finding is the tenth row, and it was invisible until it was mutated.**
+Deleting the C19 chip's link from the board passed. The board's exemption said
+"the newest row may be linkless", C19 _is_ the newest row, and C19 had been
+landed for days across eleven linked commits — so the allowance meant for a
+commit that cannot contain its own hash was silently covering a row whose hashes
+were all known. That is the hole the brief predicted in a different place: an
+exemption shaped exactly like the thing the guard exists to prevent.
+
+The fix makes the two exemptions different sizes, which they always should have
+been. The roadmap may leave its newest entry linkless, because that entry
+describes the commit being written. The board is exempt **only while the roadmap
+entry is itself linkless** — the moment the hash is written down anywhere, the
+board has no excuse left.
+
+Fixing that exposed a second defect in the same breath: the first version tested
+"does the newest roadmap line contain a commit link", and the newest line
+contains three, because that bullet links neighbouring commits inline in its
+prose. The legitimate one-commit lag started failing. An entry's own link is the
+one immediately after the word — `shipped [sha]` — and that is now what both
+checks read, so mentioning somebody else's hash no longer counts as carrying
+your own.
+
+One process note. Two of these mutations were first recorded against a stale
+script: `git checkout scripts/check-commit-links.sh` was used to revert a
+mutation and reverted the uncommitted rewrite with it, so three later runs
+tested the previous version and two of them reported a pass that meant nothing.
+**Reverting a mutation with `git checkout` only works when the file under test
+is committed.** The rest of the battery was re-run from a copy.
