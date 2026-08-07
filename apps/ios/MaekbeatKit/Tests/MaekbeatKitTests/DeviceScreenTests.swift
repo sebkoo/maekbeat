@@ -153,11 +153,36 @@ final class DeviceScreenTests: XCTestCase {
         transport.fireScheduled()
         transport.latest?.open()
 
-        // The back-fill is a task. Waited for by its result rather than by the
-        // clock — a fixed sleep is how apps/server's fan-out test spent three
-        // commits failing on load rather than on behaviour (docs/ai/AI_USAGE.md).
-        for _ in 0..<100 {
-            if model.frames.value?.count == 3 { break }
+        // The back-fill is two reads, frames then alerts (DeviceDetailModel).
+        // This waited on the frames half alone, which is a proxy for a compound
+        // operation: it goes true before the alerts request has been issued, and
+        // the alerts count below is what the test then asserts. That is what
+        // failed run 31185142716 — at the alerts count, never at the frames.
+        //
+        // So the condition names both halves. `backfill()` runs them in order,
+        // so the alerts request implies the frames are already merged; naming
+        // both anyway states what the assertions need rather than depending on
+        // an ordering this test does not control.
+        //
+        // A wall-clock deadline, not an iteration count, because the count was
+        // never a bound: 100 x 10 ms read as "1 s" while the same case took
+        // 11.643 s on the loaded runner it failed on — a sleep of 10 ms does not
+        // cost 10 ms there. Measured for this wait, each arm separately:
+        //
+        //   local idle, 20 runs        0.085 - 0.108 s   one poll interval, every run
+        //   local 12-core load, 10     0.063 - 0.312 s   one poll interval, every run
+        //   CI, 2 passing runs         0.013 - 0.016 s   whole case, both reads done
+        //
+        // 30 s is about 96x the 0.312 s maximum, and the multiple is a judgement
+        // rather than something the measurement proved. It is wider than the 8x
+        // used for a real socket refusal because this operation is cheap and
+        // in-process, so its own spread understates the environment: the 11.643 s
+        // above is the same case on a bad runner, and 30 s clears that by 2.6x.
+        let deadline = Date().addingTimeInterval(30)
+        while Date() < deadline {
+            let framesMerged = model.frames.value?.count == 3
+            let alertsAsked = stub.requested.filter { $0.path.hasSuffix("/alerts") }.count == 2
+            if framesMerged && alertsAsked { break }
             try await Task.sleep(nanoseconds: 10_000_000)
         }
 

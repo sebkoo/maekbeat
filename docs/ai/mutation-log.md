@@ -1791,3 +1791,68 @@ so all three report false.
 Applied to copies of `README.md` and `docs/ROADMAP.md`, reverted from those
 copies rather than by `git checkout`, each revert verified by `shasum` and by
 re-running the guard green.
+
+## The back-fill wait that watched the wrong half
+
+`DeviceDetailModel.backfill()` performs two reads, frames then alerts.
+`DeviceScreenTests` waited for the frames to merge and then asserted on the
+alerts request, so the condition went true one read before the thing the
+assertion tested. That is what failed run 31185142716, at the alerts count and
+never at the frames.
+
+| Guard                                | Mutation                                          | Result             |
+| ------------------------------------ | ------------------------------------------------- | ------------------ |
+| a re-open asks what alerts it missed | remove the alerts read from `backfill()`          | caught             |
+| the same, against the old condition  | remove the alerts read from `backfill()`          | caught             |
+| the wait covers both reads           | delay the alerts read 300 ms, corrected condition | passes, 0.327 s    |
+| the same, against the old condition  | delay the alerts read 300 ms, old condition       | **fails, 0.761 s** |
+
+The first two rows are the ordinary proof and they do not discriminate: deleting
+the alerts read entirely breaks the assertion either way, so both conditions
+catch it. Rows three and four are the ones that separate them, and they are the
+same mutation and the same build read twice.
+
+Delaying the alerts read by 300 ms makes the race deterministic. The old
+condition exits on the frames, finds one alerts request where it wants two, and
+fails at `:175` with the exact message from CI. The corrected condition waits
+the delay out and passes in 0.327 s, which is the 300 ms plus the poll interval
+— evidence it actually waited rather than passing for some other reason.
+
+The deadline moved from an iteration count to a wall-clock `Date` bound, and
+the reason is in the numbers rather than in taste. `100 x 10 ms` reads as one
+second and bounded nothing of the sort: the same case took 11.643 s on the
+runner it failed on, because a 10 ms `Task.sleep` does not cost 10 ms under
+contention. A hang detector that cannot state its own bound in seconds is not
+one.
+
+Applied to a copy of `DeviceDetailModel.swift`, reverted from that copy rather
+than by `git checkout`, verified by `shasum` against both the copy and
+`git show HEAD:`, rebuilt after the mutation and after the revert, with the
+mutated file named in each build log by a path-anchored pattern.
+
+### The family, listed and not fixed
+
+Twenty-seven waiting sites across the apps/ios suite were read with their
+assertions — twenty `wait(until:)` / `settle(until:)` call sites and seven
+expectation waits. The earlier count of fourteen counted helper definitions
+rather than call sites, which is the wrong unit: a helper is generic and
+whether its condition covers the assertions is decided where it is called.
+
+**One other site has this defect: `CompositionTests.swift:151`.**
+`NotificationCoordinator.prepare()` calls `port.registerCategories()` and then
+awaits `refreshAuthorization()`. The test waits on `categoryRegistrations > 0`,
+the first half, and then asserts `notifications.authorization == .authorized`,
+which the second half sets. It passes today because a fake port resolves fast,
+and its budget is 100 x 20 ms.
+
+The rest divide into three groups that are all sound. Most name the condition
+their assertion tests. Several observe the _later_ effect of an ordered pair and
+so cover the earlier one for free — `CompositionTests.swift:124` waits on the
+radio scan while `GatewayModel.start()` opens the uplink socket first, and
+`DefaultPathTests.swift:186` waits on the drop after an open that must precede
+it. A handful assert a negative (`prompts == 0`, `scheduled.count == 0`), which
+no condition can wait for by construction.
+
+The direction is the whole rule: waiting on the later half of an ordered pair is
+safe, and waiting on the earlier half is the bug. One instance is not a commit
+of its own yet; it is recorded here so the second one finds this note.
