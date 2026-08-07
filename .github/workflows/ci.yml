@@ -161,7 +161,7 @@ jobs:
       # Push is unconditional on purpose: a Dependabot auto-merge lands on main
       # as a push by that actor, and skipping it would leave badge #6 showing a
       # pre-merge number.
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@v7
         if: >-
           github.event_name == 'push' ||
           (github.actor != 'dependabot[bot]' &&
