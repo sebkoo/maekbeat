@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+# Read-only by default, so the one job that needs to write says so itself. Every
+# job below reads the repository and nothing else; `publish` adds
+# `packages: write` in its own block and is the only place that token can push
+# anything anywhere.
+permissions:
+  contents: read
+
 jobs:
   # Proves every commit message in history is trailer-free (G1) and Conventional-Commit
   # formed (G2), that the commit-msg hook itself still enforces both, and that the
@@ -292,11 +299,13 @@ jobs:
   # commits — locally the cache belongs to one machine and the tree is in front
   # of you; here it is remote storage addressed by a scope string.
   #
-  # The cost, stated rather than hidden: the image is built twice. The cached
-  # buildx build below is the artifact whose identity is asserted, and
-  # infra/verify-image.sh does its own uncached builds because a script that
-  # inspects a build has to make one. On this runner its two platforms are the
-  # same platform, so it builds once and hits the daemon cache once.
+  # The cost, measured rather than estimated: the image is built twice, and the
+  # second time costs 15 s. Run 31185142716, on a 4-CPU ubuntu-latest runner
+  # with Docker 28.0.4, spent 60 s on the cached buildx build and 15 s on
+  # infra/verify-image.sh's pair — its two platforms are the same platform
+  # here, so it builds once and hits the daemon cache once, in 0.2 s. The buildx
+  # build is the artifact whose identity is asserted; the script makes its own
+  # because one that inspects a build has to make one.
   image:
     runs-on: ubuntu-latest
     steps:
@@ -353,6 +362,109 @@ jobs:
           echo "the built image reports $arch"
       - run: bash infra/verify-image-identity.sh maekbeat-server:ci
       - run: bash infra/verify-image.sh
+
+  # Publishes the server image to GHCR, and only ever from main.
+  #
+  # The gate is decomposed rather than approximated. `image` and `compose` run
+  # on every event this workflow accepts; this job runs on a push to
+  # refs/heads/main and on nothing else, and `packages: write` is granted here
+  # and in no other job. Fork pull requests and Dependabot pull requests stay
+  # green because they never reach it — the Codecov step in `tests` carries the
+  # scar from getting that decomposition wrong once, and the fix there was the
+  # same shape: name the events, do not approximate them with an actor check.
+  #
+  # Two conditions rather than one, and the second is defence rather than the
+  # live gate. `on: push:` is already restricted to `branches: [main]`, so
+  # github.ref cannot be anything else today and deleting that half would change
+  # no current behaviour. It is written out so that widening the trigger later —
+  # a tag, a workflow_dispatch, a release branch — cannot silently start
+  # publishing from somewhere nobody meant.
+  publish:
+    needs: [image, compose]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - id: buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          use: false
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Registry paths are lowercase; github.repository is not guaranteed to be.
+      - id: ref
+        run: |
+          set -euo pipefail
+          echo "image=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')/server" >> "$GITHUB_OUTPUT"
+      # Two tags. The SHA tag is immutable and is the one to reference in
+      # anything reproducible; `latest` moves. What makes a moving tag safe here
+      # rather than a habit: this job needs both `image` and `compose`, so
+      # `latest` can only ever move to a commit whose image built for
+      # linux/amd64 and passed the nine proofs in infra/verify-image.sh and the
+      # identity check on the artifact, and whose composed stack passed the
+      # golden replay, all six Playwright tests and the shutdown proof. `main`
+      # is the only branch in this repository and `on: push:` accepts no other,
+      # so nothing can move it sideways. And it is not a release channel: this
+      # repository cuts no version tags, so `latest` means "the newest commit on
+      # main that passed CI" — which is stated here rather than implied.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/server.Dockerfile
+          platforms: linux/amd64
+          build-args: BUILD_REVISION=${{ github.sha }}
+          tags: |
+            ${{ steps.ref.outputs.image }}:${{ github.sha }}
+            ${{ steps.ref.outputs.image }}:latest
+          push: true
+          builder: ${{ steps.buildx.outputs.name }}
+          cache-from: type=gha,scope=server-amd64
+          cache-to: type=gha,mode=max,scope=server-amd64,ignore-error=true
+      # A job that exits 0 is not an image that arrived. build-push-action
+      # leaves no local copy when it pushes, so this is a genuine round trip:
+      # pull the SHA tag back out of the registry and make the pulled artifact
+      # answer for which commit it is. Everything above this line is the
+      # pipeline reporting on itself; this is the registry reporting.
+      - run: docker pull "${{ steps.ref.outputs.image }}:${{ github.sha }}"
+      - run: bash infra/verify-image-identity.sh "${{ steps.ref.outputs.image }}:${{ github.sha }}"
+      # The two tags must be one artifact. They are pushed in a single operation
+      # today, so this passes by construction — it is here so that splitting
+      # them into two pushes later cannot leave `latest` pointing somewhere else
+      # while both tags exist and both resolve.
+      - run: |
+          set -euo pipefail
+          digest_of() {
+            docker buildx imagetools inspect "$1" --format '{{.Manifest.Digest}}'
+          }
+          sha_digest=$(digest_of "${{ steps.ref.outputs.image }}:${{ github.sha }}")
+          latest_digest=$(digest_of "${{ steps.ref.outputs.image }}:latest")
+          if [ "$sha_digest" != "$latest_digest" ]; then
+            echo "latest is $latest_digest but ${{ github.sha }} is $sha_digest"
+            echo "a moving tag pointing at something other than the commit that moved it"
+            echo "is worse than no moving tag"
+            exit 1
+          fi
+          echo "both tags resolve to $sha_digest"
+      # What a pull actually transfers, asked of the registry instead of
+      # inferred from a daemon. `docker image ls` and `docker image inspect
+      # --format '{{.Size}}'` mean different things depending on which image
+      # store the daemon runs, which is why infra/README.md's two size columns
+      # read 305 / 68 on a containerd store and 207 / 207 on this runner's
+      # classic one. The manifest is the store-independent answer, and it is
+      # recomputed on every publish rather than copied into prose once.
+      - run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "${{ steps.ref.outputs.image }}:${{ github.sha }}" \
+            --raw >manifest.json
+          jq -r '.layers[] | "  layer \(.digest[7:19])  \(.size) bytes"' manifest.json
+          jq -r '[.layers[].size] | add
+                 | "compressed layer total: \(.) bytes (\(. / 1000000 | floor) MB)"' manifest.json
 
   # Proves the iOS app of C14: SwiftLint clean, the app shell compiles for a
   # simulator, and the MaekbeatKit suite passes with line coverage above its

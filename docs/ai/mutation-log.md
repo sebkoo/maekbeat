@@ -1570,3 +1570,42 @@ Applied to copies of `infra/server.Dockerfile`, `infra/compose-smoke.sh` and
 `apps/web/playwright.config.ts`, reverted from those copies rather than by
 `git checkout`, with `git diff` confirmed empty and the full smoke re-run green
 after each — `6 passed`, no skips, `stack proofs pass`.
+
+## C19 — two size columns, and what each command was actually reporting
+
+| Guard                                    | Mutation                                                       | Result |
+| ---------------------------------------- | -------------------------------------------------------------- | ------ |
+| the amd64 image is 305 MB unpacked       | run the freshly built image once and re-read `docker image ls` | caught |
+| `inspect .Size` tracks the unpacked size | same image, before and after that run                          | caught |
+
+Not a guard failing but an explanation failing, and the shape is the one this
+row keeps finding: the numbers stayed true while the sentence explaining them
+went false. `infra/README.md` recorded 305 MB unpacked and 68 MB of layer
+content for the amd64 server image and read the pair as "unpacked is what the
+host disk holds (`docker image ls`), layer content is roughly what a pull
+transfers (`docker image inspect .Size`)". The same script printed **207 MB in
+both columns** in CI, where the sentence cannot be true of either.
+
+The first explanation reached for — that the containerd image store reports
+compressed content — was plausible, unconfirmed, and only half of it survived
+being tested. What the measurements say, on this host under Colima with
+`driver-type: io.containerd.snapshotter.v1`:
+
+- a freshly built **amd64** image reads **68.1 MB** from `docker image ls`, and
+  **305 MB** after it has been run once. `inspect .Size` reads 68 MB both times.
+- the control is a native **arm64** build, which reads **301 MB** before it has
+  ever been run — because a native build is unpacked as it is built, while a
+  cross-platform one has no snapshots until something makes it run.
+- `docker save | wc -c` on the amd64 image is 68 MB, confirming the compressed
+  side a second way.
+
+So `inspect .Size` is the content store and `ls` is the unpacked snapshots, but
+only where snapshots exist; and on the runner's classic image store both
+commands report uncompressed layer content and the distinction collapses.
+`infra/verify-image.sh` now prints which store produced its table, so the
+measurement is self-labelling rather than needing this paragraph. The
+store-independent number is the registry's, which the `publish` job sums from
+the manifest on every publish.
+
+No file was mutated for this one; the experiment ran against images built from
+an unmodified tree, and `git diff` was empty throughout.

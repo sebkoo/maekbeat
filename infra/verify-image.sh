@@ -199,6 +199,18 @@ printf '  runtime      %s (docker %s / %s, compose %s)\n' \
   "$(docker version --format '{{.Client.Version}}')" \
   "$(docker version --format '{{.Server.Version}}')" \
   "$(docker compose version --short)"
+# Which image store, because it decides what the two size columns below mean.
+# Under containerd, `docker image ls` reports unpacked snapshots and
+# `inspect .Size` reports the compressed content store; under the classic store
+# both report uncompressed layer content and the two columns collapse to one
+# number. The table was read as store-independent once and was not
+# (infra/README.md).
+if docker info --format '{{json .DriverStatus}}' 2>/dev/null | grep -q 'io.containerd.snapshotter'; then
+  store="containerd — ls is unpacked snapshots, inspect .Size is compressed content"
+else
+  store="classic — both columns report uncompressed layer content"
+fi
+printf '  image store  %s\n' "$store"
 printf '  host         %s, %s CPUs and %s GiB inside the VM\n' "$(uname -sm)" \
   "$(docker info --format '{{.NCPU}}')" \
   "$(docker info --format '{{.MemTotal}}' | awk '{printf "%.1f", $1/1073741824}')"

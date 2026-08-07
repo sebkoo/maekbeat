@@ -131,10 +131,37 @@ host because `pnpm install` runs emulated.
 | maekbeat-server | 301 MB   | 68 MB         | arm64        |
 | maekbeat-web    | 84 MB    | 24 MB         | amd64        |
 
-Two columns because they answer different questions: unpacked is what the host
-disk holds (`docker image ls`), layer content is roughly what a pull transfers
-(`docker image inspect .Size`). Reporting one of them as "the size" would be
-choosing whichever number reads better.
+Two columns because they answer different questions **on this machine**, and
+the qualifier is the correction: what those two commands report depends on which
+image store the daemon runs, and the sentence that used to be here stated the
+local behaviour as a general one.
+
+Under the **containerd image store**, which is what Colima runs here
+(`docker info` reports `driver-type: io.containerd.snapshotter.v1`),
+`docker image inspect --format '{{.Size}}'` reports the content store — the
+compressed blobs — and `docker image ls` reports the unpacked overlayfs
+snapshots. So the two columns really are two questions, and the second really is
+close to what a pull transfers.
+
+Under the **classic image store**, which is what the `image` job's
+`ubuntu-latest` runner uses, both commands report the sum of uncompressed layer
+diffs and the distinction collapses: the same `verify-image.sh` run that
+produced 305 / 68 here printed 207 MB in both columns in CI. Neither number
+there is what a pull transfers.
+
+Measured rather than assumed, with a control, because the first explanation
+reached for was wrong. A freshly built amd64 image on this arm64 host reads
+68.1 MB from `docker image ls` and 305 MB after it has been run once, while
+`inspect .Size` stays at 68 MB throughout — a cross-platform build has no
+snapshots until something makes it run under emulation. The control is a native
+arm64 build, which reads 301 MB before it is ever run, because a native build is
+unpacked as it is built. `docker save | wc -c` on the amd64 image is 68 MB,
+which is the compressed side confirmed a second way.
+
+The store-independent answer to "what a pull transfers" is the registry's, not a
+daemon's, and the `publish` job asks for it: it sums `layers[].size` from the
+manifest `docker buildx imagetools inspect --raw` returns and prints the total
+on every publish, so the number is recomputed rather than copied.
 
 ## Load
 
