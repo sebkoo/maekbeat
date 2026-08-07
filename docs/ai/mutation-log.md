@@ -1147,3 +1147,44 @@ the same as sized, which is what part 2 buys.
 The third has a failure signature worth knowing: a hook that times out reports
 28 skipped rather than 28 failed. A run that says "skipped" is not a run that
 passed, and the distinction is easy to miss when scanning a log.
+
+## C19 — the board that nobody was responsible for
+
+| Guard                                   | Mutation                                                   | Result |
+| --------------------------------------- | ---------------------------------------------------------- | ------ |
+| a landed row carries a link             | delete the C17 chip from the README board                  | caught |
+| a link resolves                         | point one at a real commit that is not an ancestor of HEAD | caught |
+| a link resolves                         | point one at a well-formed SHA that is not a commit at all | caught |
+| at most one linkless row, and it newest | strip the newest shipped entry's link only                 | passes |
+| at most one linkless row, and it newest | strip the newest and one older                             | caught |
+| at most one linkless row, and it newest | strip one older, leave the newest linked                   | caught |
+| the check reads something               | drift the shipped-entry pattern so it matches nothing      | caught |
+| the check reads something               | delete all 61 links from both files                        | caught |
+
+The defect was a process gap rather than a mistake: **a commit cannot contain
+its own hash, so a chip is always added by a later commit, and nothing said
+whose job that was.** Eleven commits landed on `main` with the board showing no
+link for any of them. The C18 and C19 briefs each said to leave links empty
+until the push, which was right, and neither said who filled them in afterwards.
+
+Two mutations are worth more than their row. The first is the one that did not
+land: pointing a link at `origin/wip/c19-load` was supposed to produce a
+non-ancestor SHA and did not, because that branch turned out to be an ancestor
+of `HEAD` — the check passed and would have been recorded as NOT CAUGHT on a
+condition the mutation never created. The replacement builds a real orphan with
+`git commit-tree`, which is a commit object by every test except ancestry. **A
+mutation that does not establish its own precondition proves nothing about the
+guard, and reads exactly like one that does.**
+
+The second is the pattern-drift case, which is the failure
+`scripts/check-scope-ranges.sh` was written against and the one this class of
+script keeps rediscovering: a guard whose regex silently matches nothing
+reports success. Renaming the shipped-entry pattern so it matches no line fails
+the script rather than passing it, and deleting every link from both files
+produces 47 problems rather than a clean run.
+
+The scope was wider than the brief named. C17 through C19 were the missing
+links asked for; C0, C9, C15 and C16 were also unlinked in docs/ROADMAP.md
+while the README already carried chips for three of them, so the two files
+disagreed about what had shipped. Backfilling only what was asked for would
+have left the new guard red on its own first run.

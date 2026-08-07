@@ -43,6 +43,7 @@ Pre-ship checklist. Run every step; fix findings before committing.
 
    ```sh
    bash scripts/check-scope-ranges.sh
+   bash scripts/check-commit-links.sh
    ```
 
    Not covered by that script, so check by eye: the README Design notes rows

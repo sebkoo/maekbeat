@@ -11,7 +11,10 @@ jobs:
   # formed (G2), that the commit-msg hook itself still enforces both, and that the
   # README's three statements of each app's shipped commit range still agree —
   # the board rule covered the progress board only, and the Stack table drifted
-  # two commits behind the tour above it before anything noticed (C14).
+  # two commits behind the tour above it before anything noticed (C14). Since
+  # C19 it also proves every commit the roadmap calls shipped is linked from the
+  # board, and that every link resolves to an ancestor of HEAD — which needs the
+  # fetch-depth: 0 checkout below.
   hygiene:
     runs-on: ubuntu-latest
     steps:
@@ -21,6 +24,11 @@ jobs:
       - run: bash scripts/test-githooks.sh
       - run: bash scripts/check-commit-hygiene.sh
       - run: bash scripts/check-scope-ranges.sh
+      # Every commit the roadmap calls shipped is linked from the board, and
+      # every link resolves to an ancestor of HEAD. The board went eleven
+      # commits with no chips at all — a commit cannot link itself, so the job
+      # always falls to a later one and nothing was making it happen.
+      - run: bash scripts/check-commit-links.sh
 
   # Proves the workspace packages pass their vitest suites and typechecks (first package: C1).
   # Since C9 the suites run once, coverage-enabled: each package's vitest.config.ts
