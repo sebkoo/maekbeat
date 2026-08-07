@@ -337,7 +337,7 @@ jobs:
       # stay green: neither may write to this repository's Actions cache, and a
       # build that succeeded should not be failed by a cache it was never going
       # to be allowed to fill.
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           file: infra/server.Dockerfile
@@ -413,7 +413,7 @@ jobs:
       # so nothing can move it sideways. And it is not a release channel: this
       # repository cuts no version tags, so `latest` means "the newest commit on
       # main that passed CI" — which is stated here rather than implied.
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           file: infra/server.Dockerfile
