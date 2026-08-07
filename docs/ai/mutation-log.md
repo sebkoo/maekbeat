@@ -1638,3 +1638,44 @@ and an install to add nothing (docs/DECISIONS.md #31).
 Applied to copies of `infra/cdk/cdk.json` and `infra/cdk/src/suppressions.ts`,
 reverted from those copies rather than by `git checkout`, with `git diff`
 confirmed empty and the suite re-run green (28 passed) after each.
+
+## C19 — the publish gate, and what a skipped job proves
+
+| Guard                                        | Mutation                                              | Result |
+| -------------------------------------------- | ----------------------------------------------------- | ------ |
+| `publish` is unreachable from a pull request | none — the control, PR #12 against the unmutated job  | caught |
+| the ref clause excludes a non-main push      | widen `on: push` to `[main, ci-publish]`, gate intact | caught |
+| the ref clause excludes a non-main push      | the same, minus `github.ref == 'refs/heads/main'`     | caught |
+
+**Read the third row as skipped-versus-executed, not green-versus-red.** Every
+one of these ran with `push: false` on the publish step, so with the gate
+removed the job reaches its build and then fails at the pull-back verification,
+which has nothing to pull. A red `publish` is the expected shape of that
+mutation and not a broken job; the observable is that the job ran at all.
+`push: false` is not a convenience here — without it the mutation would publish
+an image from a branch, which is exactly the artifact the clause exists to
+prevent, so the test would manufacture its own counterexample. It was asserted
+present in the committed tree before each push rather than assumed.
+
+The first two rows are what make the third mean anything. The control is the
+ordinary case: on PR #12, seven jobs succeeded and `publish` was the one skip.
+That alone does not say which half of the condition did the work, because a
+pull request fails `github.event_name == 'push'` and the ref clause is never
+consulted.
+
+So the second row satisfies the first clause on purpose. With `on: push`
+widened to `[main, ci-publish]`, a push to this branch is a push event, and
+`github.ref` is `refs/heads/ci-publish` — `publish` skipped in 0 s
+(run 31191484750). That is the ref clause with a measured effect rather than an
+argued one, and it is the answer to a claim made earlier in this row and
+withdrawn: that the clause was pure defence-in-depth and could not be observed
+under the current trigger. It could not be observed without widening the
+trigger, which is a different sentence, and widening it is a two-line change to
+a branch that never merges.
+
+One more thing the second mutation showed, which it was not designed for. With
+`push: false`, `docker/build-push-action` succeeded — it built the image and had
+nothing to upload — and the job went red one step later, at the pull-back. That
+is the arrival check earning its place against a real negative rather than a
+hypothetical one: a publish step exiting 0 while no image exists in the registry
+is precisely the case it was written for, and it is the step that noticed.
