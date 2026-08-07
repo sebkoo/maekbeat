@@ -92,11 +92,15 @@ The host that builds is arm64 and the deploy target is x86-64. `docker build` on
 
 ## The delivery pipeline (C19)
 
-`.github/workflows/ci.yml` runs six jobs, all of them on every push to `main` and every pull request against it. Five predate this row: `hygiene` (commit messages, scope ranges, commit links, action versions, hazard citations), `tests` (`pnpm -r test:coverage` and `typecheck` across every workspace package), `smoke` (the Playwright suite of C13 against a locally built bundle and a real server process), `ios` (SwiftLint, the app shell, MaekbeatKit and the gateway integration suite on a macOS runner), and `docs-lint`.
+`.github/workflows/ci.yml` runs seven jobs, all of them on every push to `main` and every pull request against it. Five predate this row: `hygiene` (commit messages, scope ranges, commit links, action versions, hazard citations), `tests` (`pnpm -r test:coverage` and `typecheck` across every workspace package), `smoke` (the Playwright suite of C13 against a locally built bundle and a real server process), `ios` (SwiftLint, the app shell, MaekbeatKit and the gateway integration suite on a macOS runner), and `docs-lint`.
 
 `image` is the sixth and the first that builds a container. It builds [infra/server.Dockerfile](../infra/server.Dockerfile) for `linux/amd64` through buildx with a `type=gha` layer cache, then asks the artifact which commit it is: [infra/verify-image-identity.sh](../infra/verify-image-identity.sh) reads `org.opencontainers.image.revision` off the image and the `revision` field off a running `/healthz`, both against `git rev-parse HEAD`. [infra/verify-image.sh](../infra/verify-image.sh) then runs unchanged, so the nine container proofs execute in CI instead of only on one laptop.
 
 That identity check belongs to the cache rather than to the build. A stale layer yields an image that behaves correctly while being the wrong software, and this job is the first place in this repository where layers are reused across builds of different commits.
+
+`compose` is the seventh. It builds both images through [infra/compose.yaml](../infra/compose.yaml), stands the stack up, and runs [infra/compose-smoke.sh](../infra/compose-smoke.sh) — the golden replay through a real `/ingest` socket, the C13 Playwright suite against the two containers, and a stop under a peer that ignores the close frame. It builds its own images rather than consuming the `image` job's artifact, because `up --build` is what stops a run reusing whatever image happens to be tagged, which is the failure the identity assertions exist to catch.
+
+The two jobs run in parallel and prove different things: `image` proves the deploy-target artifact and its cache, `compose` proves the running system. `compose` is also the job that makes [apps/web/e2e/identity.spec.ts](../apps/web/e2e/identity.spec.ts) run at all — it skips unless `E2E_EXPECTED_REVISION` is set, and only the smoke script sets it. The same six tests therefore run twice per event with two skip budgets, 1 in `smoke` and 0 in `compose`, each pinned from outside the suite by `scripts/check-e2e-skips.sh`.
 
 ## The AWS form of the same stack — synthesized, never deployed
 

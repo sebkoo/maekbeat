@@ -208,7 +208,75 @@ jobs:
       # System dependencies still need installing on a cache hit.
       - if: steps.playwright-cache.outputs.cache-hit == 'true'
         run: pnpm --filter @maekbeat/web exec playwright install-deps chromium
-      - run: pnpm --filter @maekbeat/web test:e2e
+      # Piped through a log so scripts/check-e2e-skips.sh can read the run's own
+      # summary. `set -o pipefail` explicitly: GitHub's default shell is
+      # `bash -e`, which would otherwise report tee's exit status and swallow a
+      # failed suite.
+      - run: |
+          set -euo pipefail
+          pnpm --filter @maekbeat/web test:e2e 2>&1 | tee smoke-e2e.log
+      # One skip is correct here and only here: e2e/identity.spec.ts has no
+      # revision to compare against when the suite is started from a working
+      # tree. The compose job below runs the same six tests with a budget of
+      # zero, and the pair is the point — see scripts/check-e2e-skips.sh for why
+      # this is not a second copy of e2e/skip-budget.ts.
+      - run: bash scripts/check-e2e-skips.sh smoke-e2e.log 1
+
+  # Proves the composed stack: both containers, built from this tree, with the
+  # C13 Playwright suite driving them through a real browser.
+  #
+  # This is the job apps/web/e2e/identity.spec.ts was written for and had never
+  # reached. That test skips unless E2E_EXPECTED_REVISION is set, only
+  # infra/compose-smoke.sh sets it, and nothing in CI ran that script — so the
+  # one test in the suite that asks which build is answering had run on a
+  # developer's laptop and nowhere else.
+  #
+  # It builds its own images through compose rather than consuming the `image`
+  # job's artifact, and that is deliberate. infra/compose-smoke.sh runs
+  # `up --build` because a run that reuses whatever image happens to be tagged
+  # is the exact thing its identity assertions exist to catch; pointing this job
+  # at a pre-built tag was mutated locally and failed three assertions at once,
+  # identity.spec.ts among them (docs/ai/mutation-log.md). The two jobs
+  # therefore run in parallel and prove different things: `image` proves the
+  # deploy-target artifact and its cache, this proves the running system.
+  compose:
+    runs-on: ubuntu-latest
+    env:
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      # The same browser cache the smoke job uses, keyed the same way: the
+      # download is ~90 MB and changes only when Playwright does.
+      - id: playwright-version
+        run: echo "version=$(pnpm --filter @maekbeat/web exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+      - if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: pnpm --filter @maekbeat/web exec playwright install --with-deps chromium
+      - if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: pnpm --filter @maekbeat/web exec playwright install-deps chromium
+      # BUILD_REVISION is deliberately not set here. The script takes the
+      # revision from `git rev-parse HEAD` and refuses a disagreeing override,
+      # because compose builds from the tree regardless of what the variable
+      # says — a run with it set three commits behind passed every proof in that
+      # file, identity included, and was recorded NOT CAUGHT.
+      - run: |
+          set -euo pipefail
+          bash infra/compose-smoke.sh 2>&1 | tee compose-e2e.log
+      # Zero skips, asserted from outside the suite. e2e/skip-budget.ts already
+      # compares the run against playwright.config.ts's budget, but that budget
+      # is computed from E2E_EXPECTED_REVISION — so if the variable stopped
+      # reaching the suite, the budget would become 1, identity.spec.ts would
+      # skip, and the reporter would agree with it.
+      - run: bash scripts/check-e2e-skips.sh compose-e2e.log 0
 
   # Proves the deploy-target container image builds from this commit, and is
   # still this commit once it has been built.

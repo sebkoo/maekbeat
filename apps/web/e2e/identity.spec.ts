@@ -24,14 +24,21 @@ import { API_URL } from "../playwright.config";
  * green tick for a comparison that did not happen is the failure mode this
  * whole file is about.
  *
- * Where that leaves it today, stated because the CI log does not: nothing in
- * .github/workflows/ci.yml stands up the compose stack, so this is the one test
- * in the suite that has never run there. It runs on a developer's machine, via
- * infra/compose-smoke.sh, and it starts running in CI at the commit that puts
- * the compose smoke into the workflow — named as still to come in the C19 row
- * of docs/ROADMAP.md. Until then the skip is correct and the coverage is not:
- * the number of skips is budgeted in playwright.config.ts so this one stays the
- * only one, which is a different thing from it being checked.
+ * Where that leaves it, and this paragraph is rewritten by the commit that
+ * changed it: the `compose` job in .github/workflows/ci.yml stands the stack up
+ * and runs infra/compose-smoke.sh, so this test now runs in CI on every push and
+ * every pull request. Before that job existed it ran on a developer's machine
+ * and nowhere else — not because anything was hard, but because no job invoked
+ * the script.
+ *
+ * It still skips in the `smoke` job, which drives a locally built bundle and a
+ * spawned server and has no revision to compare against. That is two runs of
+ * these six tests with two different skip budgets, and both are checked:
+ * playwright.config.ts sets the budget from the environment and
+ * e2e/skip-budget.ts enforces it, while scripts/check-e2e-skips.sh pins the
+ * number from outside the suite in each job — 1 in `smoke`, 0 in `compose`.
+ * The outside check is what notices if E2E_EXPECTED_REVISION ever stops
+ * reaching the suite, which would make this test skip while the budget agreed.
  */
 const expected = process.env.E2E_EXPECTED_REVISION;
 

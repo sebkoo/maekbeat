@@ -18,7 +18,27 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.."
 
-export BUILD_REVISION=${BUILD_REVISION:-$(git rev-parse HEAD)}
+# The revision under test comes from the working tree and is not accepted from
+# the environment. compose builds from this tree whatever BUILD_REVISION says,
+# so an overridden value labels both images, is served by /healthz and is what
+# every assertion below compares against — three places agreeing with each other
+# and with nothing in the repository. This is not hypothetical: a run with
+# BUILD_REVISION set three commits behind passed every proof in this file,
+# including the identity ones, and was recorded NOT CAUGHT
+# (docs/ai/mutation-log.md). An identity check whose expected value is supplied
+# by whoever asked for the build is a value agreeing with itself.
+#
+# It refuses rather than silently overriding, because a caller that set the
+# variable meant something by it and a quiet correction hides which run happened.
+HEAD_REVISION=$(git rev-parse HEAD)
+if [ -n "${BUILD_REVISION:-}" ] && [ "$BUILD_REVISION" != "$HEAD_REVISION" ]; then
+  printf 'BUILD_REVISION is %s but this working tree is %s.\n' "$BUILD_REVISION" "$HEAD_REVISION"
+  printf 'compose builds from the tree, so these have to agree or the identity proofs\n'
+  printf 'below compare the build argument against itself. Unset it, or check out the\n'
+  printf 'commit you meant to smoke.\n'
+  exit 1
+fi
+export BUILD_REVISION=$HEAD_REVISION
 COMPOSE=(docker compose -f infra/compose.yaml)
 API_URL=http://127.0.0.1:3000
 WEB_URL=http://127.0.0.1:8080

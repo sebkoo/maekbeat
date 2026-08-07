@@ -1529,3 +1529,44 @@ range instead would have been a claim that C20 and C20a belong to C19.
 
 Applied to a copy of `README.md`, reverted from that copy rather than by
 `git checkout`, with the guard confirmed green again after each.
+
+## C19 — the compose smoke in CI, and a revision that came from the caller
+
+| Guard                                       | Mutation                                                       | Result     |
+| ------------------------------------------- | -------------------------------------------------------------- | ---------- |
+| identity, infra/compose-smoke.sh            | bake a literal SHA into the server image's revision label      | caught     |
+| identity, infra/compose-smoke.sh            | drop `--build` and pre-tag an image built three commits back   | caught     |
+| skip budget, e2e/skip-budget.ts             | force `EXPECTED_SKIPS` to 1 for the compose run                | caught     |
+| the revision under test comes from the tree | run the whole smoke with `BUILD_REVISION` three commits behind | NOT CAUGHT |
+
+The first two are the two ways a stack can be the wrong software. A literal in
+the `LABEL` line is caught by the label assertion alone — `/healthz`, the golden
+replay and all six Playwright tests stay green, which is the whole argument for
+asserting identity separately from behaviour. Pre-tagging `maekbeat-server:compose`
+from a tree three commits back and removing `up --build` is the stale-cache case,
+and it is caught three times over: the label, the served revision, and
+`e2e/identity.spec.ts` failing inside the Playwright run (`5 passed`, not 6).
+That last one is the test this whole job exists to run, catching the exact
+failure it was written for, in CI's shape rather than a laptop's.
+
+The third is the budget proving it is a budget. Forced to 1 while the compose
+run skips nothing, `e2e/skip-budget.ts` reported `0 test(s) skipped, 1 expected`
+and failed the run — so the zero on the compose side is asserted rather than
+observed, which is what makes it evidence that `identity.spec.ts` ran.
+
+The fourth changed the code. `infra/compose-smoke.sh` read its revision as
+`${BUILD_REVISION:-$(git rev-parse HEAD)}`, so a caller could supply it — and
+compose builds from the working tree regardless of what that variable says. Run
+with `BUILD_REVISION` set three commits behind, every proof in the file passed,
+including all three identity assertions and `identity.spec.ts` itself: the label
+matched the served revision, the served revision matched the build argument, and
+the build argument matched nothing in the repository. **Three places agreeing is
+only evidence when the value they agree on came from somewhere none of them
+chose.** The script now takes `git rev-parse HEAD` and refuses a disagreeing
+override rather than silently correcting it, because a caller that set the
+variable meant something by it.
+
+Applied to copies of `infra/server.Dockerfile`, `infra/compose-smoke.sh` and
+`apps/web/playwright.config.ts`, reverted from those copies rather than by
+`git checkout`, with `git diff` confirmed empty and the full smoke re-run green
+after each — `6 passed`, no skips, `stack proofs pass`.
