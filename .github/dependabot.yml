@@ -1,11 +1,20 @@
 version: 2
 updates:
+  # Daily, not weekly, on both ecosystems. Dependabot only sees a dependency
+  # once a full manifest scan has read it, and the last one ran on 2026-08-05
+  # against a repository that had two actions and eight npm packages in it —
+  # everything added since has never been examined. The interval is how long a
+  # new dependency stays invisible, and this repository adds them hourly.
+  #
+  # Revert to "weekly" when that stops being true: once the dependency surface
+  # is stable for a few weeks, daily is churn rather than coverage. The full
+  # reasoning, the measurements behind it and that revert condition are in
+  # docs/DECISIONS.md #27.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
-  # Forward-looking: the repo has zero npm dependencies today.
+      interval: "daily"
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "daily"
