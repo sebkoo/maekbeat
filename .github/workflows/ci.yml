@@ -29,6 +29,13 @@ jobs:
       # commits with no chips at all — a commit cannot link itself, so the job
       # always falls to a later one and nothing was making it happen.
       - run: bash scripts/check-commit-links.sh
+      # Every reference to an action names the same version. Dependabot bumped
+      # setup-node to v7 across the workflow, and a job added three commits
+      # later reintroduced v4 by copying an older step — the runner said so in a
+      # deprecation warning and a warning in a green log is a thing nobody
+      # reads. The rule is internal consistency, deliberately not newness; the
+      # blind spot that leaves is written down in the script.
+      - run: bash scripts/check-action-versions.sh
 
   # Proves the workspace packages pass their vitest suites and typechecks (first package: C1).
   # Since C9 the suites run once, coverage-enabled: each package's vitest.config.ts
@@ -122,6 +129,17 @@ jobs:
                 ;;
             esac
           done
+      # The action-version guard runs in the hygiene job above. It is asserted
+      # from this job rather than from inside itself, because a guard asked to
+      # confirm its own wiring says nothing at all when the wiring is what was
+      # deleted — the same reason the ios gate is asserted from here and not
+      # from apps/ios. Anchored as CI would execute it, so a mention in a
+      # comment or a call with "|| true" appended does not pass.
+      - run: |
+          grep -qE '^ *- run: bash scripts/check-action-versions\.sh *$' .github/workflows/ci.yml || {
+            echo "no step in this workflow runs scripts/check-action-versions.sh"
+            exit 1
+          }
       - run: pnpm -r test:coverage
       - run: pnpm -r typecheck
       # Badge #6 data source: the upload feeds the README Codecov badge, which
@@ -236,7 +254,7 @@ jobs:
       # The gateway's resume rule is checked against the server that has to
       # honour it, not against a Swift restatement of what that server does — so
       # this step needs a real apps/server, and therefore Node (C15).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - run: corepack enable

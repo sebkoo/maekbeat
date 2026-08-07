@@ -1266,3 +1266,43 @@ One thing this does not do. It counts skips; it does not run the skipped test.
 `identity.spec.ts` still runs on a developer's machine and nowhere else, and the
 commit that changes that is the compose-smoke-in-CI commit named as remaining in
 the C19 row of [../ROADMAP.md](../ROADMAP.md).
+
+## C19 — one action, one version
+
+| Guard                         | Mutation                                                        | Result |
+| ----------------------------- | --------------------------------------------------------------- | ------ |
+| one action, one version       | none — the drift already on `main`, `setup-node` at v7 and v4   | caught |
+| one action, one version       | drop docs-lint's `setup-node` to v6                             | caught |
+| one action, one version       | add `actions/cache/restore@v6` beside `actions/cache@v4`        | caught |
+| the rule is per-action        | move `codecov-action` to v3, three versions across four actions | passes |
+| the guard reads something     | drift its `uses:` pattern to `consumes:`                        | caught |
+| the hygiene job still runs it | delete the invocation from the hygiene job                      | caught |
+| the hygiene job still runs it | append `\|\| true` to the invocation                            | caught |
+
+The first row is the one that costs nothing and proves the most: the guard was
+written, run against unmodified `main`, and failed. **The defect it exists to
+catch was already there** — `actions/setup-node` at v7 in four jobs and v4 in
+the ios job, saying so only through a Node 20 deprecation warning in a green
+log. No mutation was needed to produce the condition, so none can be accused of
+having produced it.
+
+The fourth row is the rule's boundary, not a hole in it. `checkout@v7`,
+`setup-node@v7`, `cache@v4` and `codecov-action@v3` disagree with each other in
+every direction and the script is silent, because versions are not comparable
+across actions. That is also the shape of what this does **not** catch: an
+action that is uniformly stale is uniformly consistent. `actions/cache@v4` is
+exactly that, its deprecation warning survives this commit, and the reasoning is
+in docs/DECISIONS.md #26 rather than left to be inferred.
+
+The last two rows are why the assertion lives in the `tests` job. A guard asked
+whether it is still wired reports nothing at all when the wiring is what was
+deleted — it does not run to report it. Anchoring the grep to the step as CI
+would execute it is what makes the `|| true` row a catch instead of a pass.
+
+One mutation was recorded only after being rebuilt. The subpath row was first
+written as a **replacement** of `actions/cache@v4` by `actions/cache/restore@v6`
+and came back NOT CAUGHT — correctly, because a swap leaves one reference and
+one version, and the disagreement the row claims to test never existed. The
+totals said so plainly: 11 references to 4 actions, unchanged from the baseline.
+**A mutation that does not change the counts did not create the condition**, and
+the corrected version adds the subpath step rather than substituting it.
