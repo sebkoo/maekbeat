@@ -1609,3 +1609,32 @@ the manifest on every publish.
 
 No file was mutated for this one; the experiment ran against images built from
 an unmodified tree, and `git diff` was empty throughout.
+
+## C19 — synth in CI, and the sliver the suite cannot see
+
+| Guard                                            | Mutation                                                      | Result     |
+| ------------------------------------------------ | ------------------------------------------------------------- | ---------- |
+| cdk-nag fails the synth, `pnpm -r test:coverage` | remove one acknowledgement from infra/cdk/src/suppressions.ts | caught     |
+| the CDK suite covers `cdk synth`                 | point cdk.json's `app` at a file that does not exist          | NOT CAUGHT |
+
+The row promised "synth-in-CI" and the first question was whether a job for it
+would check anything the existing one does not. It would not. Removing a single
+acknowledgement fails `pnpm --filter @maekbeat/infra-cdk test` with
+`ValidationFailed` raised **inside** `Template.fromStack` in `src/main.test.ts`
+— the rule pack failing the synthesis, which is precisely what `cdk synth`
+does with a finding — plus three assertion failures in `src/nag.test.ts`. The
+synthesis, the rule pack and the acknowledgements all execute in CI today and
+have since the CDK commit landed.
+
+The second mutation is the part that is genuinely uncovered, and it is narrow.
+With `cdk.json`'s `app` pointed at `src/main-typo.ts`, all 28 tests passed in
+2.66 s while `pnpm --filter @maekbeat/infra-cdk synth` failed with
+`Subprocess exited with error 1`. The suite imports `./main` directly, so the
+manifest that names it, `tsx`, and the `aws-cdk` CLI's agreement with
+`aws-cdk-lib` are all outside it. One step in the `tests` job covers exactly
+that and costs about five seconds; a job would have cost a runner, a checkout
+and an install to add nothing (docs/DECISIONS.md #31).
+
+Applied to copies of `infra/cdk/cdk.json` and `infra/cdk/src/suppressions.ts`,
+reverted from those copies rather than by `git checkout`, with `git diff`
+confirmed empty and the suite re-run green (28 passed) after each.

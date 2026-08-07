@@ -156,6 +156,25 @@ jobs:
           }
       - run: pnpm -r test:coverage
       - run: pnpm -r typecheck
+      # `cdk synth` as the CLI actually invokes it, which is one step and not a
+      # job on purpose. The synthesis is not new coverage: the suite above
+      # already synthesizes the app infra/cdk/src/main.ts builds, cdk-nag
+      # included — removing one acknowledgement from src/suppressions.ts fails
+      # it with ValidationFailed raised inside Template.fromStack, which is what
+      # a synth does with a finding. What no test in that package can see is the
+      # wrapper: cdk.json's `app` command, tsx resolving it, and the aws-cdk CLI
+      # agreeing with aws-cdk-lib. Pointed at a file that does not exist,
+      # cdk.json left all 28 tests passing while this command failed
+      # (docs/DECISIONS.md #31).
+      #
+      # Neither input has a default, by design. Nothing here is deployed, so any
+      # well-formed certificate ARN synthesizes (infra/cdk/README.md); the
+      # revision is the real one, so a synth cannot pass on a value the rest of
+      # this workflow would reject.
+      - run: |
+          BUILD_REVISION="$(git rev-parse HEAD)" \
+          API_CERTIFICATE_ARN="arn:aws:acm:eu-west-1:111122223333:certificate/11111111-2222-3333-4444-555555555555" \
+            pnpm --filter @maekbeat/infra-cdk synth
       # Badge #6 data source: the upload feeds the README Codecov badge, which
       # renders the last uploaded number and shows "unknown" when none exists.
       # fail_ci_if_error keeps a silent upload failure from leaving the badge

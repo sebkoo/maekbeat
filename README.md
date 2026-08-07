@@ -54,7 +54,7 @@ That diagram is the target architecture, not today's system — the Status board
 | Hazard rows a build can check               | [docs/regulatory](docs/regulatory) — each row cites its test, `scripts/check-hazard-tests.sh` fails when one stops resolving | C20 ✅ · C20a ✅ · C21 (planned)          |
 | Health-data security posture                | [SECURITY.md](SECURITY.md) (today) · docs/security/threat-model.md                                                           | C22 (planned)                             |
 | iOS background execution + BLE lifecycle    | five-phase machine + background notes, [apps/ios](apps/ios) README                                                           | C15 ✅                                    |
-| Tooling choices and trade-offs              | [docs/DECISIONS.md](docs/DECISIONS.md) (30 entries today)                                                                    | C0 ✅                                     |
+| Tooling choices and trade-offs              | [docs/DECISIONS.md](docs/DECISIONS.md) (31 entries today)                                                                    | C0 ✅                                     |
 | Process auditability                        | ADRs in docs/adr · PR template + CI hygiene job in .github                                                                   | C0 ✅                                     |
 
 Engineers: start at [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · the why: [docs/DECISIONS.md](docs/DECISIONS.md) · the plan: [docs/ROADMAP.md](docs/ROADMAP.md).
