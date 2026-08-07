@@ -1856,3 +1856,38 @@ no condition can wait for by construction.
 The direction is the whole rule: waiting on the later half of an ordered pair is
 safe, and waiting on the earlier half is the bug. One instance is not a commit
 of its own yet; it is recorded here so the second one finds this note.
+
+## The second instance, found by that scan
+
+`NotificationCoordinator.prepare()` calls `registerCategories()` and then awaits
+`refreshAuthorization()`. `CompositionTests` waited on the registration and
+asserted on the authorization, which is the same shape one entry above. The fix
+is the directional rule: wait on the later half, which covers the registration
+for free.
+
+| Guard                                   | Mutation                                        | Result             |
+| --------------------------------------- | ----------------------------------------------- | ------------------ |
+| launch reads the permission, not assume | delay `refreshAuthorization()` 300 ms, new wait | passes, 0.421 s    |
+| the same, against the old condition     | delay `refreshAuthorization()` 300 ms, old wait | **fails, 1.108 s** |
+
+Same mutation, same build, read twice. The old condition fails at `:154` with
+`("notDetermined") is not equal to ("authorized")`; the corrected one passes in
+0.421 s, which is the 300 ms delay plus a poll interval and the hosting
+overhead — the right duration, not merely a green result. Deleting the read
+instead of delaying it was not used, because both conditions catch that.
+
+The neighbour stayed green throughout:
+`testTheLinkScreenReReadsThePermissionOnEveryAppearance` already waits on the
+authorization itself and passed under the mutation.
+
+`settle` also moved from 100 iterations to a wall-clock deadline, which changes
+all seven waits in the file. Measured over them: local idle 0.000–0.197 s across
+70 waits in 10 runs, local under 12-core load 0.000–1.833 s across 42 waits in
+6 runs. **1.833 s against a count that read as two seconds** is the argument;
+30 s is about 16x it and the multiple is a judgement.
+
+The elapsed-time instrumentation used to take those numbers was removed rather
+than shipped, so the measurement was taken on code that differs from what
+landed. Applied to a copy of `NotificationCoordinator.swift`, reverted from that
+copy, verified by `shasum` against the copy and `git show HEAD:`, rebuilt after
+the mutation and after the revert.

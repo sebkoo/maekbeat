@@ -60,13 +60,34 @@ final class CompositionTests: XCTestCase {
     /// sleep: the condition is the assertion, and a test that waits for the
     /// clock instead of for the condition is the flake C13's repair removed
     /// from apps/server (docs/ai/AI_USAGE.md, 2026-08-06).
+    ///
+    /// The bound is wall-clock rather than 100 iterations, for the reason
+    /// e5cc33d records: a 20 ms sleep does not cost 20 ms under contention, so
+    /// the count read as "2 s" and bounded nothing of the sort. Measured over
+    /// this file's seven waits, the device-list read being the slowest:
+    ///
+    ///   local idle, 10 runs, 70 waits        0.000 - 0.197 s
+    ///   local 12-core load, 6 runs, 42       0.000 - 1.833 s
+    ///
+    /// That loaded maximum is the argument: 1.833 s against a count that read
+    /// as two seconds. 30 s is about 16x it, and the multiple is a judgement
+    /// rather than a measured result.
+    ///
+    /// It is the same 30 s e5cc33d set for the back-fill wait, and deliberately
+    /// so. Both bound in-process waits on these runners, so the number is
+    /// anchored on the worst inflation observed for any of them — 11.643 s, one
+    /// case on a loaded CI runner — rather than on each site's own spread. That
+    /// is why the multiples differ, 16x here against 96x there, and the bound
+    /// does not.
     private func settle(
         until condition: () -> Bool,
         _ what: String,
+        timeout: TimeInterval = 30,
         file: StaticString = #filePath,
         line: UInt = #line
     ) async {
-        for _ in 0..<100 {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
             if condition() { return }
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
@@ -148,7 +169,12 @@ final class CompositionTests: XCTestCase {
             notifications: wired.notifications
         ))
 
-        await settle(until: { wired.centre.categoryRegistrations > 0 }, "the actions to register")
+        // `prepare()` registers the categories and then awaits the permission
+        // read, so waiting on the registration goes true one step before the
+        // authorization below is set. Wait on the later half; it covers the
+        // registration for free (e5cc33d).
+        await settle(until: { wired.notifications.authorization == .authorized },
+                     "the permission read that follows the registration")
 
         XCTAssertEqual(wired.centre.categoryRegistrations, 1)
         XCTAssertEqual(
