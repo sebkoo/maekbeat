@@ -35,7 +35,7 @@
     "@vitejs/plugin-react": "^6.0.5",
     "@vitest/coverage-v8": "^4.1.10",
     "axe-core": "^4.12.1",
-    "jsdom": "^28.0.0",
+    "jsdom": "^30.0.1",
     "puppeteer-core": "^25.4.0",
     "tsx": "^4.23.5",
     "typescript": "^7.0.2",
