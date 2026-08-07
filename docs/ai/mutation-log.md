@@ -1306,3 +1306,41 @@ one version, and the disagreement the row claims to test never existed. The
 totals said so plainly: 11 references to 4 actions, unchanged from the baseline.
 **A mutation that does not change the counts did not create the condition**, and
 the corrected version adds the subpath step rather than substituting it.
+
+## C19 — the docs page, as opposed to the docs route
+
+| Guard                          | Mutation                                                | Old test | New test |
+| ------------------------------ | ------------------------------------------------------- | -------- | -------- |
+| the docs page renders          | mount the UI at `/api-docs` instead of `/docs`          | caught   | caught   |
+| the docs page renders          | 404 every `/docs/static/` asset, leave the page at 200  | passes   | caught   |
+| the docs page renders          | answer `/docs` with 200 `text/html` that is not the UI  | passes   | caught   |
+| the docs page renders          | 404 `/docs/json`, leave the page and its assets serving | passes   | caught   |
+| the asset loop reads something | serve the mount point with zero asset references        | passes   | caught   |
+
+`@fastify/swagger-ui` went from 5.2.6 to 6.1.1 — a major bump on a runtime
+dependency — and merged green. The reason is in the first column: **every
+assertion in `openapi.test.ts` was about the OpenAPI document**, which
+`@fastify/swagger` produces, and the one case that touched `/docs` asked only
+whether the status was in `[200, 302]`. The UI is a different package and could
+have shipped broken with this file entirely satisfied.
+
+The first row is the weak mutation and is recorded as such: moving the route
+prefix is caught by the old test too, because it turns 200 into 404 and a status
+check can see that. The next three are the commit's actual justification. Each
+leaves `/docs` answering 200 with HTML — the old assertion's whole content —
+while the page is blank, or styleless and scriptless, or an empty Swagger UI
+whose spec fetch 404s. **A status code cannot see a blank screen.**
+
+The fifth row is the loop's positive control. The page's assets are read out of
+its markup rather than listed in the test, which is right — a bundle that
+renames a file must stay served, and a hard-coded list would go on asserting the
+old names. The cost of reading them is that a page carrying no references at all
+makes the loop vacuous, so the count is asserted before the loop runs.
+
+Two notes on method. The third mutation also failed an unrelated case, because a
+hand-rolled `/docs` route joins the OpenAPI document and changes the route
+surface — noise, not a second catch, and the fifth mutation hides its routes with
+`schema: { hide: true }` to keep the signal clean. And the fifth landed without a
+confirming grep: the shell escaping for `id="swagger-ui"` did not match, but the
+failure reads `expected 0 to be greater than or equal to 5` against a baseline
+page carrying seven references, which only the mutated page can produce.
