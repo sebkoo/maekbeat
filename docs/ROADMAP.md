@@ -72,8 +72,8 @@ Ordering note: C18 and C19 were swapped during C18. The observability work is pr
 
 ## Phase 7 — Depth (planned)
 
-- C20 — docs(regulatory): intended-use statement + IEC 62304 class rationale tied to the real architecture + SOUP inventory.
-- C21 — docs(regulatory): risk register seeded from the C4 failure modes plus alarm-fatigue and battery rows. One row is already on the record: docs/regulatory/risk-register.md carries the alert-evicted-before-triage hazard and its control, seeded when C12's acknowledgement route exposed it.
+- C20 — docs(regulatory): a hazard analysis its own tests can check — shipped: the framing, the classification argument, and the hazard table. docs/regulatory/README.md states the position the rest depends on — this is not a medical device, and what follows applies the structure the lifecycle standards ask for to an educational codebase rather than claiming conformance — then makes the classification argument both ways and lists what a real submission would need that this has none of. docs/regulatory/hazard-analysis.md carries eight hazards, every one populated from a defect this project actually had: the alert raised while the socket was down (C17), the stalled dashboard that would have been silently thinned (C19), the idle socket on a quiet device (the heartbeat), the alert evicted before triage (C12a, moved here from risk-register.md), the shipped app that opened no socket while every unit test passed (C17), the shutdown that discarded buffered telemetry (C18), alarm fatigue, and a notification claiming more than the data supports. **Each row cites the test that demonstrates its control, and scripts/check-hazard-tests.sh fails the build when a citation stops resolving** — a missing file, a renamed test, a skipped one, or a row citing nothing — which is the whole argument for this being engineering rather than paperwork; eight mutations in docs/ai/mutation-log.md, including a real skipped test as the positive control. Standards are cited only where a primary source was read on 2026-08-07 (the U.S. Code, the eCFR, the Federal Register API, the openFDA endpoints); IEC 62304 and ISO 14971 are paywalled, so no clause number appears anywhere and the unread citations are listed as such. The gap the document found that the code did not: nothing alarms on the absence of data.
+- C21 — docs(regulatory): the lifecycle map + SOUP inventory, and the risk register proper. The map names which existing practice here corresponds to which lifecycle process — git and the commit-hygiene guards as configuration management, the mutation log and DECISIONS as problem resolution, the zod schemas and goldens as requirements — written from this codebase upward rather than from the standard down. The register adds the columns C20's hazard table deliberately does not have: probability, severity, acceptability against criteria fixed in advance, and an overall residual risk evaluation, seeded from the C4 failure modes plus the battery and BLE-range rows C20 names as still missing.
 - C22 — docs(security): STRIDE threat model + data-flow diagram + append-only audit log + CycloneDX SBOM in release CI.
 
 Defensibility rule for C20 and C21: every claim cites a repo path or is marked "planned — C(n)". No guidance or standard is cited without a demonstrating artifact in the repo.
@@ -89,25 +89,25 @@ What a connected-health platform has to do to exist at all, and where each
 capability is demonstrated here. The mapping is the point: every row names an
 artifact in this repository or the commit that will produce it.
 
-| Capability                                    | Artifact                                                                                         | Commit                  |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------- |
-| Device-to-cloud-to-client platform            | device→cloud→web pipeline across apps/ and packages/                                             | C1–C19                  |
-| Responsive web client                         | apps/web dashboard, WCAG 2.2 AA pass                                                             | C10–C13                 |
-| Native mobile client                          | apps/ios SwiftUI app                                                                             | C14–C17                 |
-| Backend services and API contract             | apps/server REST routes + OpenAPI                                                                | C5–C6                   |
-| Cloud deployment as code                      | infra/cdk stack — synthesized and asserted, never deployed                                       | C19                     |
-| Device→phone→web pipeline                     | server→web leg in docs/demo/preview.gif (C12); device→phone leg — C15; alert→caregiver→log — C16 | C12, C15, C16           |
-| Scale target and load evidence                | k6 profile with measured numbers                                                                 | C19                     |
-| Testing and validation discipline             | golden tests, server suite, coverage gate, web + iOS tests                                       | C3, C8–C9, C13–C14, C17 |
-| Architecture, performance, security           | ARCHITECTURE.md budgets, k6 measurements, STRIDE model                                           | C4, C19, C22            |
-| Written communication and decision records    | docs/adr/, PR template, commit discipline                                                        | C0                      |
-| Observability and delivery pipeline           | OpenTelemetry tracing (C18); Dockerfile, compose, CI image pipeline (C19)                        | C0, C18, C19            |
-| Connected-device integration                  | BLE GATT doc + BLE lifecycle state machine                                                       | C15                     |
-| Regulated-software literacy                   | intended-use + IEC 62304 rationale + SOUP inventory                                              | C20                     |
-| Security posture and post-market surveillance | SECURITY.md CVD, Dependabot, SBOM at release, patch cadence                                      | C0, C22                 |
-| Sensors and BLE transport                     | vitals-sim transport + CoreBluetooth central                                                     | C2, C15                 |
-| Real-time pipeline                            | WebSocket ingest, ring buffer, alert engine                                                      | C6–C7                   |
-| Product measurement loop                      | v0.2 loop definition + post-release track                                                        | C23                     |
+| Capability                                    | Artifact                                                                                                          | Commit                  |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| Device-to-cloud-to-client platform            | device→cloud→web pipeline across apps/ and packages/                                                              | C1–C19                  |
+| Responsive web client                         | apps/web dashboard, WCAG 2.2 AA pass                                                                              | C10–C13                 |
+| Native mobile client                          | apps/ios SwiftUI app                                                                                              | C14–C17                 |
+| Backend services and API contract             | apps/server REST routes + OpenAPI                                                                                 | C5–C6                   |
+| Cloud deployment as code                      | infra/cdk stack — synthesized and asserted, never deployed                                                        | C19                     |
+| Device→phone→web pipeline                     | server→web leg in docs/demo/preview.gif (C12); device→phone leg — C15; alert→caregiver→log — C16                  | C12, C15, C16           |
+| Scale target and load evidence                | k6 profile with measured numbers                                                                                  | C19                     |
+| Testing and validation discipline             | golden tests, server suite, coverage gate, web + iOS tests                                                        | C3, C8–C9, C13–C14, C17 |
+| Architecture, performance, security           | ARCHITECTURE.md budgets, k6 measurements, STRIDE model                                                            | C4, C19, C22            |
+| Written communication and decision records    | docs/adr/, PR template, commit discipline                                                                         | C0                      |
+| Observability and delivery pipeline           | OpenTelemetry tracing (C18); Dockerfile, compose, CI image pipeline (C19)                                         | C0, C18, C19            |
+| Connected-device integration                  | BLE GATT doc + BLE lifecycle state machine                                                                        | C15                     |
+| Regulated-software literacy                   | intended use + classification argument + hazard analysis with a guard (C20); lifecycle map + SOUP inventory (C21) | C20, C21                |
+| Security posture and post-market surveillance | SECURITY.md CVD, Dependabot, SBOM at release, patch cadence                                                       | C0, C22                 |
+| Sensors and BLE transport                     | vitals-sim transport + CoreBluetooth central                                                                      | C2, C15                 |
+| Real-time pipeline                            | WebSocket ingest, ring buffer, alert engine                                                                       | C6–C7                   |
+| Product measurement loop                      | v0.2 loop definition + post-release track                                                                         | C23                     |
 
 ## Post-release track (no commit numbers)
 

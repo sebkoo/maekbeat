@@ -1344,3 +1344,64 @@ surface — noise, not a second catch, and the fifth mutation hides its routes w
 confirming grep: the shell escaping for `id="swagger-ui"` did not match, but the
 failure reads `expected 0 to be greater than or equal to 5` against a baseline
 page carrying seven references, which only the mutated page can produce.
+
+## C20 — the hazard row that cites a test, and the guard that checks it
+
+| Guard                         | Mutation                                                                   | Result |
+| ----------------------------- | -------------------------------------------------------------------------- | ------ |
+| the cited test exists (TS)    | rename a cited vitest title in the row: "one" → "ones"                     | caught |
+| the cited test runs           | repoint a row at `identity.spec.ts::serves the revision it was built from` | caught |
+| a row cites something         | delete H4's only citation, leaving the cell empty                          | caught |
+| the row pattern reads rows    | drift `ROW_RE` to `HAZARD-ROW-[0-9]+`, matching nothing                    | caught |
+| the cited file exists         | repoint a citation at `apps/server/src/heartbeat.test.ts`                  | caught |
+| the cited test exists (Swift) | rename a cited XCTest method in the row: append `2`                        | caught |
+| the title is a declaration    | comment out the cited `it(...)`, leaving the title in the comment          | caught |
+| one table, no strays          | add a second hazard table under its own heading                            | caught |
+
+`scripts/check-hazard-tests.sh` is the only thing standing between
+`docs/regulatory/hazard-analysis.md` and the fate of every hazard analysis
+written outside a quality system, which is to go quietly out of date while
+reading exactly the same. So the mutations are aimed at the four ways a citation
+can rot — the file goes, the test is renamed, the test stops running, the row
+stops citing — plus the two ways the guard itself can go blind.
+
+**Row two is the real positive control, and it is a real skipped test.**
+`apps/web/e2e/identity.spec.ts` compares the revision on `/healthz` against the
+one the stack was built from, and skips when `E2E_EXPECTED_REVISION` is unset,
+which is every CI run today (C19, and the skip budget added at `094c83b`). It is
+the one skipped test in the repository, so the assertion that a skipped citation
+fails is checked against a genuine instance rather than against a skip written
+to be caught.
+
+Rows four and eight are the guard's own blind spots, and they are the pair that
+matters most. A check whose pattern no longer matches anything reports success —
+`check-scope-ranges.sh` was built shape-sensitive for the same reason, and
+`check-commit-links.sh` learned it the hard way. So drifting `ROW_RE` must fail,
+and it does: zero rows is an error rather than a clean run. Row eight closes the
+other door, where the table stays intact and a second one appears beside it
+holding the hazards nobody wants checked; any table line that is neither a
+hazard row nor the header is named rather than skipped.
+
+Two notes on method, both about mutations that did not behave the first time.
+**Row four initially did not land at all** — the perl escaping for a pattern
+full of backslashes and brackets silently rewrote nothing, and the harness
+reported "MUTATION DID NOT LAND" rather than a result, which is the amendment of
+2026-08-05 doing its job: an uncatchable mutation is a question about the setup
+before it is a question about the code. Re-run with the substitution anchored to
+`^ROW_RE=`, the drifted line was confirmed in the file by grep and the guard
+failed. And **row seven exists because the first version of the check was too
+weak to catch it**: matching the title with `grep -F` alone meant a title quoted
+in a comment satisfied the citation, so the check now requires the line carrying
+the title to also be a test declaration. That mutation was written to fail, did,
+and the guard was tightened until it passed.
+
+The whole-file skip rule is deliberately conservative and is not a defect. Any
+skip or `.only` in a cited file fails the citation, whether or not it encloses
+the cited test, because working that out needs a parser and the cheap rule errs
+toward a false alarm instead of a silent pass. `.only` counts as a skip here for
+the reason that matters: it makes every other test in the run skip.
+
+Every mutation above was applied to a working tree copy, confirmed present in
+the file by grep before the guard was run, and reverted from a file copy rather
+than by `git checkout` — with the guard confirmed green again after each revert.
+None is present in any commit.

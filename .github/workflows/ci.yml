@@ -36,6 +36,13 @@ jobs:
       # reads. The rule is internal consistency, deliberately not newness; the
       # blind spot that leaves is written down in the script.
       - run: bash scripts/check-action-versions.sh
+      # Every hazard row in docs/regulatory/hazard-analysis.md cites the test
+      # that demonstrates its control, and this fails the build when one of
+      # those citations stops resolving — a missing file, a renamed test, a
+      # skipped one, or a row citing nothing at all. A regulatory document
+      # rots because nothing connects it to the system it describes; this is
+      # the connection, and it is why C20 is engineering rather than paperwork.
+      - run: bash scripts/check-hazard-tests.sh
 
   # Proves the workspace packages pass their vitest suites and typechecks (first package: C1).
   # Since C9 the suites run once, coverage-enabled: each package's vitest.config.ts
