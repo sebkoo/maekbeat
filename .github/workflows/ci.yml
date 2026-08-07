@@ -479,11 +479,36 @@ jobs:
       # recomputed on every publish rather than copied into prose once.
       - run: |
           set -euo pipefail
-          docker buildx imagetools inspect "${{ steps.ref.outputs.image }}:${{ github.sha }}" \
-            --raw >manifest.json
-          jq -r '.layers[] | "  layer \(.digest[7:19])  \(.size) bytes"' manifest.json
-          jq -r '[.layers[].size] | add
-                 | "compressed layer total: \(.) bytes (\(. / 1000000 | floor) MB)"' manifest.json
+          image="${{ steps.ref.outputs.image }}"
+          tag="$image:${{ github.sha }}"
+          # The tag resolves to an OCI index, not a manifest, which is how this
+          # step first went red: `.layers` on an index is null.
+          # docker/build-push-action attaches a SLSA provenance attestation by
+          # default on a registry push, so the index holds two entries — the
+          # linux/amd64 image manifest, and an attestation manifest marked
+          # `vnd.docker.reference.type: attestation-manifest`.
+          #
+          # Summing the index would fold the attestation blob into a number
+          # labelled "what a pull transfers", and a client pulling this tag
+          # fetches the matching platform's manifest and its layers, never the
+          # attestation. So resolve the index, select by platform, and sum that
+          # manifest — an imprecise sentence about this exact column is what
+          # sent someone reading it wrong in the first place.
+          digest=$(docker buildx imagetools inspect "$tag" --raw |
+            jq -r '.manifests[]
+                   | select(.platform.architecture == "amd64" and .platform.os == "linux")
+                   | .digest')
+          if [ -z "$digest" ]; then
+            echo "no linux/amd64 manifest in the index for $tag"
+            exit 1
+          fi
+          docker buildx imagetools inspect "$image@$digest" --raw >platform-manifest.json
+          jq -r '.layers[] | "  layer \(.digest[7:19])  \(.size) bytes"' platform-manifest.json
+          # -e so a null sum exits non-zero instead of printing "null" into a
+          # green log, which is the shape of the bug this step is fixing.
+          jq -e -r '[.layers[].size] | add
+                    | "linux/amd64 compressed layer total: \(.) bytes (\(. / 1000000 | floor) MB)"' \
+            platform-manifest.json
 
   # Proves the iOS app of C14: SwiftLint clean, the app shell compiles for a
   # simulator, and the MaekbeatKit suite passes with line coverage above its

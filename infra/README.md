@@ -158,10 +158,25 @@ arm64 build, which reads 301 MB before it is ever run, because a native build is
 unpacked as it is built. `docker save | wc -c` on the amd64 image is 68 MB,
 which is the compressed side confirmed a second way.
 
-The store-independent answer to "what a pull transfers" is the registry's, not a
-daemon's, and the `publish` job asks for it: it sums `layers[].size` from the
-manifest `docker buildx imagetools inspect --raw` returns and prints the total
-on every publish, so the number is recomputed rather than copied.
+The store-independent answer to "what a pull transfers" is the registry's, and
+getting it takes one step more than it looks. The tag resolves to an OCI
+**index**, not a manifest: `docker/build-push-action` attaches a SLSA provenance
+attestation by default on a registry push, so the index lists the `linux/amd64`
+image manifest beside an attestation manifest marked
+`vnd.docker.reference.type: attestation-manifest`. Summing the index would fold
+the attestation blob into the number, and a client pulling this tag fetches the
+matching platform's manifest and its layers and never the attestation.
+
+**The honest number is the layer sum of the platform manifest.** For `49185bf`
+that is 68,070,567 bytes across six layers, the largest of them 51.6 MB. The
+`publish` job resolves the index by platform and prints it on every publish, so
+it is recomputed rather than copied out of this paragraph.
+
+That figure and the 68 MB in the table above are both compressed-content
+numbers and they agree to about two parts in ten thousand, which is as far as
+the comparison is worth taking: the two images were built from different commits,
+so a decomposition of the remaining bytes into config blob and revision string
+would be arithmetic on two things that are not the same artifact.
 
 ## Load
 
