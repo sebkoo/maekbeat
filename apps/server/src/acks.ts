@@ -1,11 +1,24 @@
 import { latestDecisions, type AlertDecision, type AlertDecisionEvent } from "@maekbeat/protocol";
 
 /**
- * The decision log — append-only by construction, not by convention: there is
- * no update and no delete on this class, so a change of mind is another event
- * and the history of who judged what, when, survives it. That is the shape
- * C22's audit log needs (docs/ROADMAP.md), and the C23 product loop reads
- * acknowledged-against-dismissed straight off it.
+ * The decision log — append-only against MODIFICATION and bounded against
+ * RETENTION, which are different properties and were run together here until
+ * C22 read the method beneath this comment.
+ *
+ * Nothing already written is ever changed: events are frozen on append, a
+ * change of mind is another event, and the decision in force is derived by the
+ * reader rather than overwritten by the writer. That much is real.
+ *
+ * But this class does delete. Beyond `limit` events for a device the oldest are
+ * spliced away, so "no delete" — which this comment used to claim three lines
+ * above the splice that does it — was false. The retention bound is 200 per
+ * device by default and nothing in apps/server constructs it with another
+ * value.
+ *
+ * That silent eviction is H2's harm at a second site, recorded in
+ * docs/regulatory/hazard-analysis.md: the alert history at least counts its
+ * forced drops and serves the count on GET /devices, and this log discards its
+ * oldest decisions with nothing counted, served or logged.
  */
 export class DecisionLog {
   private readonly byDevice = new Map<string, AlertDecisionEvent[]>();

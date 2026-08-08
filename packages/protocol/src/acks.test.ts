@@ -58,8 +58,10 @@ describe("alertDecisionEventSchema", () => {
 });
 
 describe("latestDecisions", () => {
-  // The log is append-only: a change of mind is another event, and the reader
-  // derives the decision in force rather than the writer overwriting it.
+  // The log is append-only against modification: a change of mind is another
+  // event, and the reader derives the decision in force rather than the writer
+  // overwriting it. It is NOT append-only against deletion — apps/server's
+  // DecisionLog evicts its oldest events past a retention bound (C22).
   it("reads the decision in force as the newest event for each alert", () => {
     const dismissed: AlertDecisionEvent = {
       ...EVENT,
