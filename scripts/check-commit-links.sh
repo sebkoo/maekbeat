@@ -73,14 +73,68 @@ compare_links=$(grep -ohE 'maekbeat/compare/[0-9a-f]{7,40}\.\.\.[0-9a-f]{7,40}' 
 compare_shas=$(printf '%s\n' "$compare_links" | sed 's/\.\.\./ /' | tr ' ' '\n' | grep -E '^[0-9a-f]{7,40}$')
 linked_shas=$(printf '%s\n%s\n' "$commit_links" "$compare_shas" | grep -E '^[0-9a-f]{7,40}$' | sort -u)
 
+# This loop reads a flat set of shas and has lost which link each came from, so
+# a failure named the sha and left the reader to find it. One grep recovers the
+# location; which loop reports is unchanged.
+where_linked() {
+  grep -nF "$1" "$BOARD" "$PLAN" 2>/dev/null | head -2 |
+    sed -E 's/^([^:]+):([0-9]+):.*/\1:\2/'
+}
+
+report_location() {
+  local at
+  at=$(where_linked "$1")
+  [ -n "$at" ] || return 0
+  while IFS= read -r line; do
+    [ -n "$line" ] && note "  linked at $line"
+  done <<EOF
+$at
+EOF
+}
+
 if [ -z "$linked_shas" ]; then
   fail "neither $BOARD nor $PLAN links a single commit; this check would pass vacuously"
 fi
+
+# A compare link written with two dots is REJECTED rather than read.
+#
+# This was a hole, found by perturbation rather than by reading (Q4 in
+# docs/ai/mutation-log.md). Every collector above keys on `...`, so
+# `compare/<sha>..<sha>` never split, neither end reached linked_shas, and the
+# chip loop did not recognise it as a compare link at all. It was not rejected;
+# it was unseen. A board carrying one got a byte-identical green summary —
+# "3 compare range(s)" — with a fourth sitting unchecked in the file.
+#
+# Rejecting is the right answer rather than widening the collectors to accept
+# both. GitHub's two-dot and three-dot compares do not mean the same thing, so a
+# chip written with `..` is a different claim about which commits a row holds,
+# and this file has one shape it checks. Widening would also mean editing four
+# separate patterns and the split, which is how the shapes drifted apart in the
+# first place.
+#
+# The pattern cannot match inside a valid three-dot link: it requires a hex
+# character immediately after the two dots, and a three-dot link has a third dot
+# there.
+two_dot=$(grep -ohE 'maekbeat/compare/[0-9a-f]{7,40}\.\.[0-9a-f]{7,40}' "$BOARD" "$PLAN")
+if [ -n "$two_dot" ]; then
+  while IFS= read -r bad; do
+    [ -z "$bad" ] && continue
+    fail "$bad is a two-dot compare link; this script reads three-dot ranges only"
+    note "  Written this way it is not checked at all — not the range, not its"
+    note "  ends, not what it covers. Rewrite it as base...head."
+    report_location "${bad#maekbeat/compare/}"
+  done <<EOF
+$two_dot
+EOF
+fi
+
 for sha in $linked_shas; do
   if ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
     fail "$sha is linked but is not a commit in this repository"
+    report_location "$sha"
   elif ! git merge-base --is-ancestor "$sha" HEAD 2>/dev/null; then
     fail "$sha is linked but is not an ancestor of HEAD"
+    report_location "$sha"
   fi
 done
 
@@ -90,6 +144,40 @@ done
 # base...head with the two reversed renders a page, resolves both SHAs, and
 # passes every ancestry test above while showing no commits at all. Ordering is
 # the only thing that distinguishes it.
+#
+# WHY THE `|| continue` BELOW IS NOT A HOLE, and how to check that rather than
+# take it on trust. Read in isolation, `git cat-file -e ... || continue` reads
+# as "an unresolvable sha is skipped", which would make an invented compare base
+# pass silently. It does not, and the reason is upstream of this loop:
+#
+#   - the `compare_shas` / `linked_shas` assignments in section 1 split EVERY
+#     compare range on `...` and fold both ends into `linked_shas`, alongside
+#     the plain commit links. A compare base is not a shipped sha and does not
+#     have to be one to get there — `7e80bb5` is in that set today and belongs
+#     to no row.
+#   - the `for sha in $linked_shas` loop that closes section 1 fails any sha
+#     that is not a commit, or is not an ancestor of HEAD.
+#   - that loop runs BEFORE this one, and `fail` records rather than exits, so
+#     by the time control arrives here every sha involved is already validated
+#     or already counted as a failure.
+#
+# So these `continue`s cannot turn a bad range green. What they do is stop one
+# bad sha from producing three or four further confusing errors underneath the
+# accurate one — `git rev-list` on an unresolvable ref yields nothing, which
+# would then be reported as a row its chip fails to cover.
+#
+# WHAT WOULD BREAK IT: a sha reaching these loops without passing through
+# `linked_shas`. A new link shape — a tree link, a tag — must have both its ends
+# collected into `linked_shas` in section 1, or the fail-closed loop there will
+# not see them and these branches become the hole they merely resemble.
+#
+# The `..` case is no longer hypothetical. It was tried (Q4), it was neither
+# read nor rejected, and section 1 now fails on it explicitly.
+#
+# They are kept rather than deleted for a second, independent reason: without
+# them `full=$(git rev-parse "$sha" 2>/dev/null)` leaves `full` empty, and the
+# later `grep -q "^${full}$"` becomes `grep -q "^$"`, which matches a blank line
+# and answers the coverage question with noise instead of a verdict.
 # ---------------------------------------------------------------------------
 for range in $compare_links; do
   base=${range%%...*}

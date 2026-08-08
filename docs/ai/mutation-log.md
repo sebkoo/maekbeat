@@ -2105,3 +2105,110 @@ Every perturbation was applied by writing a modified copy over the target and
 restored by `cp` from a backup taken before the first; `diff -q` confirmed both
 files byte-identical to their backups between each one. No `git` command was
 used to restore anything.
+
+## C21, after the row closed — a hole that was not there
+
+No behaviour changed here. This entry exists because a wrong conclusion was
+reached by a method worth not repeating, and the measurement that settled it is
+cheap to re-run.
+
+**The method error.** `scripts/check-commit-links.sh` has several
+`git cat-file -e ... || continue` and `git rev-parse ... || continue` sites.
+Read on their own they say "an unresolvable sha is skipped", which would mean an
+invented compare base passes silently — a real hole, and in the one place that
+decides which commits a roadmap row is claimed to contain. The reading came from
+grepping the `continue` sites and never reading what feeds the loop they sit in.
+
+**What the input actually is.** The `compare_shas` / `linked_shas` assignments
+in section 1 split every compare range on `...` and fold BOTH ends into
+`linked_shas`, next to the plain commit links. A compare
+base does not have to be a shipped sha to get there; `7e80bb5` is in that set
+today and belongs to no row. The loop that follows walks `linked_shas` and fails
+any sha that is not a commit or is not an ancestor of HEAD, and it runs before
+every one of the `continue` sites. They cannot turn a bad range green. What they
+do is stop one bad sha from burying its own accurate error under three vaguer
+ones.
+
+| Guard                                 | Perturbation                                             | Result         |
+| ------------------------------------- | -------------------------------------------------------- | -------------- |
+| a compare base must resolve (Q1)      | `compare/7e80bb5...eeecfcf` base to `7e80bb0`            | caught         |
+| a compare head must resolve (Q2)      | same chip, head to `eeecfc0`                             | caught         |
+| a range must run forwards (Q3)        | reverse it to `eeecfcf...91af466`, both ends valid       | caught         |
+| a range shape must be recognised (Q4) | add `compare/91af466..eeecfcf`, two dots, both ends real | **NOT CAUGHT** |
+
+Q3 is the one worth keeping, because it is the case the ancestry `|| continue`
+appears to cover and the only one that silently mislabels which commits a row
+contains. It fails in the block above that one, before the branch that looks
+like it would skip it.
+
+**What would make the reading correct.** A sha reaching those loops without
+passing through `linked_shas` — a new link shape, a tag, a range written with
+`..` rather than `...`. The script now says so at the point a reader would
+otherwise draw the same conclusion, and names the two independent reasons the
+branches are kept rather than deleted.
+
+**Q4 is the one that found something, and it came from the comment rather than
+the code.** The comment written for Q1-Q3 named "a range written with `..`" as a
+thing that would break the invariant. That was a hypothetical nobody had tried,
+which is the shape this repository keeps finding in other people's work, so it
+was tried.
+
+A two-dot compare chip pointing at two real commits produced a **byte-identical
+green summary**: `3 compare range(s)`, exit 0, with a fourth range sitting in
+`README.md`. Every collector keys on `...`, so the token never split, neither
+end reached `linked_shas`, and the chip loop did not recognise it as a compare
+link at all. It was not rejected. It was unseen — which is worse than rejected,
+because the summary counted three ranges and read as complete.
+
+The fix rejects the shape rather than widening the collectors to read it.
+GitHub's two-dot and three-dot compares do not mean the same thing, so `..` is a
+different claim about which commits a row holds, and widening would have meant
+editing four separate patterns plus the split — which is how the shapes came
+apart in the first place. Q4 now fails, naming the link and the file and line;
+Q1 to Q3 still fail unchanged.
+
+Two smaller things fell out. The comment first cited "line 83" and "line 73",
+and moving one function made both stale inside the same commit — the references
+are by name now, since a guard whose own comment rots is the failure it exists
+to prevent. And Q1 and Q2 named the sha but not the chip, because the failing
+loop reads a flat set and has lost which link each sha came from; that is now
+one grep for the file and line rather than a restructure of which loop reports.
+
+**The sweep this lesson asked for, and what it found.** A reference to a line
+number in another file rots, and this commit demonstrated it rotting inside
+itself. So the class was swept rather than assumed unique: `line N`, `lines
+N-M` and `file.ext:N` across `README.md`, `docs/` and `scripts/`. It found
+**nine live cross-file line references across five files** — `docs/DECISIONS.md`
+to `StreamClient.swift:195` and `DeviceDetailView.swift:74`,
+`docs/regulatory/hazard-analysis.md` to `DeviceDetailView.swift:74`,
+`docs/ai/AI_USAGE.md` twice to `stream.test.ts:162`, this file three times to
+`CompositionTests.swift` and `DefaultPathTests.swift`, and
+`scripts/check-phase-status.sh` to `check-commit-hygiene.sh` line 18.
+
+Every one sampled resolves correctly today, which is the finding rather than a
+reassurance: they are accurate, unguarded, and nothing would report the day one
+stops being true. **They are not fixed here.** Nine references in five files is
+a refactor, and running it inside a commit about a single stale comment is how a
+commit stops being one thing. It is a candidate, named the way C21's closing
+bullet names the two it declined — and it is the same unguarded class as the one
+recorded there, a prose claim about another file that no guard reaches.
+
+The one instance fixed here is the one this commit introduced: the paragraph
+above cited "lines 72-74" of the script while describing why line-number
+citations rot.
+
+The handoff, so this does not rest in a log nobody re-reads: the candidate
+belongs beside the two `docs/ROADMAP.md` already declines in C21's closing
+bullet, and the place to write it is C22's row when that row is written — not by
+reopening a closed row from a commit scoped to `scripts/` and this file.
+
+**One thing left as it is, recorded rather than fixed.** The summary line counts
+compare ranges _found_ rather than ranges _checked_. That is the report agreeing
+with itself, and it cannot mislead while the fail-closed loop stands, because a
+range whose ends do not resolve fails the run. It is honest by consequence, not
+by construction, which is a weaker property than it reads as.
+
+Q1 and Q2 named the sha and not the chip, because the failing loop reads a flat
+set and has lost which link each sha came from. That is now one grep for the
+file and line rather than a restructure of which loop reports: both print
+`linked at README.md:108`. Q3's message was already specific and is unchanged.
