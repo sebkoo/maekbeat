@@ -2000,3 +2000,108 @@ declaration, not what resolves beneath it.
 Every mutation was applied by writing a modified copy over the target and
 restored by `cp` from a backup taken before the first one; six paths were backed
 up, one per target. No `git` command appears in the battery.
+
+## C21 — the register, and the guard extended to read it
+
+`scripts/check-hazard-tests.sh` now reads two documents. The register marks a
+row `demonstrated` partly on the grounds that this script checks its citation,
+so the script had to actually check it; a criterion that asserts its own
+enforcement and is not enforced is worse than one that claims nothing.
+
+| Guard                                      | Mutation                                                             | Result         |
+| ------------------------------------------ | -------------------------------------------------------------------- | -------------- |
+| a cited test must exist (P4)               | change one row's test title only: `not 30 alerts` to `not 31 alerts` | caught         |
+| a cited file must exist (P5)               | change one row's path only: `alerts.test.ts` to `alarms.test.ts`     | caught         |
+| a single-citation row fails closed (P6)    | mangle the register H6 row's ONLY citation to `banana:`              | caught         |
+| both ID sets agree, analysis side (P2)     | delete the H6 row from `hazard-analysis.md`                          | caught         |
+| both ID sets agree, register side (P3)     | delete the H6 row from `risk-register.md`                            | caught         |
+| `register-only` grants the exemption (P7a) | strip `register-only` from H10, which sits in no hazard table        | caught         |
+| `register-only` grants nothing else (P7b)  | keep the marker on H10, break one citation's path to `quiet.test.ts` | caught         |
+| a multi-citation row losing one (P1)       | mangle ONE of H7's three citations to `banana:`                      | **NOT CAUGHT** |
+
+P4 and P5 are the two that matter, because they are the only mutations here
+that make a row **claim something false** — a control demonstrated by a test
+that does not exist. Both fail the build naming the row and the missing test.
+P2 and P3 cover the cross-check added at C21, in both directions.
+
+### The `register-only` marker, and why it is a door with a hinge
+
+The cross-check exempts a register row from "must exist in the hazard analysis"
+when the row says `register-only`. An exemption is a way to make a row
+unfalsifiable if it exempts too much, so both halves are observed rather than
+reasoned about.
+
+**It is not an unexercised branch.** H9 and H10 carry the marker today and are
+the reason it exists: both are hazards this register adds that no hazard table
+identifies. The accepting path runs on every green build, and P7a shows the
+marker is what grants the exemption — strip it from H10 and the build fails.
+
+**It exempts exactly one assertion.** Citations are verified in `check_lines`,
+which runs over every row of both documents before the cross-check is reached,
+so the marker cannot reach them. P7b holds the marker in place and breaks one
+of H10's citation paths: the build fails on the citation. Marking a row
+`register-only` does not make it unfalsifiable; it says only "this hazard is
+identified here rather than in the hazard analysis", and everything else about
+the row is still checked.
+
+That is why the marker stays rather than the cross-check being made
+unconditional. It is not a door built for a case that has not arrived — two
+rows walk through it today, and an unconditional cross-check would make those
+two rows impossible to write.
+
+### The limitation P1 marks, stated as a boundary rather than a worry
+
+**What is not caught:** a row carrying several citations loses one of them to a
+form outside the citation grammar. The row still passes.
+
+**Why it is not caught:** `banana:` has one colon, not two, so it is not a
+malformed citation — it is prose. Rows legitimately carry backtick spans that
+are not citations (`ALERT_HISTORY_LIMIT`, `apps/server/src/alerts.ts`,
+`21 CFR 882.1580`, `.swift`), and no rule on the span's shape separates a
+broken citation from an env-var reference. Rejecting every non-citation span
+would fail every row in both documents.
+
+**Why it does not falsify the row:** the surviving citations still demonstrate
+the control, so the row's claim remains true and merely rests on less evidence
+than it did. That is a weaker defect than the one this guard exists to prevent,
+which is a row claiming a test nobody can find — and P4 and P5 show that one is
+caught.
+
+**Where the boundary is, observed and not assumed:** when the mangled citation
+is the row's **only** one, the row fails closed. That is P6, run against the
+register's H6, and the failure names the offending span in its output:
+`Backtick spans found in this row, none of them a citation: ... banana:`. So
+the gap is exactly "multi-citation row, one span corrupted", and it closes
+itself as soon as a row is down to its last citation.
+
+**What would close it, deliberately not done:** parse citations from a
+dedicated column rather than from the whole row, so that every backtick span
+inside that one cell must be well formed. `hazard-analysis.md` already has a
+`Verified by` column that would serve; the register does not, and adding one
+would restructure a table introduced in this same commit to catch a defect that
+does not make any row untrue. The cost is not worth the coverage, and writing
+the boundary down is the alternative to pretending there is none.
+
+**P1 was a mis-specified perturbation and is recorded as one.** It was written
+to test whether an unrecognised citation form fails, but `banana:` falls
+outside the grammar by construction, so it asked the guard to distinguish
+something it has no rule to distinguish. What it should have been is P4 —
+well-formed, resolvable-looking, unresolvable — which is the shape an actual
+false claim takes. The record is kept because a perturbation that passes for
+the wrong reason is easy to re-run later and misread as coverage.
+
+Two defects in the guard were found by writing these rows rather than by
+running them. A row could carry **both** a resolvable citation and the
+`no-control:` sentinel: `cites` is tested first, so the contradiction was
+accepted as controlled and the sentinel branch was never reached. And the
+sentinel did not exist at all until C21 — the branch failed unconditionally
+while its own message offered "or say in the row that none exists", so **a
+hazard with no control could not be recorded in a checked table**, which made
+these documents structurally capable of holding only hazards already fixed.
+H9, the battery row, is the first row in this repository to declare an absent
+control, and it is counted and reported rather than waived.
+
+Every perturbation was applied by writing a modified copy over the target and
+restored by `cp` from a backup taken before the first; `diff -q` confirmed both
+files byte-identical to their backups between each one. No `git` command was
+used to restore anything.

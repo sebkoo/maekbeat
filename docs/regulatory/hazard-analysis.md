@@ -82,8 +82,28 @@ reader who knows the standard checks first.
 - **Hazards found from defects, not from a systematic search.** These rows came
   from things that broke. A real analysis works the other way — a structured
   sweep over functions, interfaces, use errors and foreseeable misuse — and
-  would find hazards this repository has not encountered yet. The battery and
-  BLE-range hazards the roadmap has been carrying since C4 are still not here.
+  would find hazards this repository has not encountered yet. Two that such a
+  sweep reaches immediately are a wearable whose battery dies and one carried
+  out of BLE range; neither is in this table, and both are scored in
+  [risk-register.md](risk-register.md) as H9 and H10.
+
+  **Correction, C21.** This bullet used to read "the battery and BLE-range
+  hazards the roadmap has been carrying since C4". `git log -S` against
+  `docs/ROADMAP.md` shows it was **wrong in both directions at once**, which is
+  the part worth recording. Battery was there _earlier_ than claimed: named in
+  the **C21** row since the bootstrap commit `0b0308e`, never at C4. BLE range
+  was not there _at all_ until `4b76c8b` — **which is C20, the commit that wrote
+  this sentence.** It asserted the roadmap had carried a hazard since C4 in the
+  same change that first put that hazard in the roadmap.
+
+  C4's row names five failure modes — device disconnect, duplicate packets,
+  delayed or out-of-order packets, clock drift, and offline buffering with
+  replay — and neither hazard is among them. A sentence that misdates one item
+  early and one item late is not approximately right and was not a slip in
+  recall: it was written without opening the file it describes. Nothing in this
+  repository checks a prose claim about another file, which is why it survived
+  a commit whose whole argument was that citations should be machine-checked.
+
 - **Use error is barely covered.** H8 is the only row about a person
   misunderstanding the system, and it addresses the copy rather than the
   interaction.

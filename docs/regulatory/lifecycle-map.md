@@ -49,7 +49,7 @@ or it covers one part of the area; **absent** means there is nothing; **planned
 | Release                              | Container build, `infra/verify-image-identity.sh`, GHCR publish from `main` alone                  | Partial  |
 | Configuration management             | git with linear history, `.githooks/`, `scripts/check-commit-hygiene.sh`, `pnpm-lock.yaml`         | Practice |
 | Problem resolution                   | Nothing. `docs/ai/mutation-log.md` records deliberate breaks, not reported problems                | Absent   |
-| Risk management                      | `docs/regulatory/hazard-analysis.md` + `scripts/check-hazard-tests.sh`                             | Practice |
+| Risk management                      | `docs/regulatory/hazard-analysis.md` + `risk-register.md` + `scripts/check-hazard-tests.sh`        | Practice |
 | SOUP                                 | `docs/regulatory/soup-inventory.md` + `scripts/check-soup-inventory.sh`                            | Partial  |
 | Maintenance                          | Dependabot alone (`.github/dependabot.yml`, `docs/DECISIONS.md` #27)                               | Absent   |
 
@@ -323,9 +323,10 @@ Traceability runs one direction only. Each row cites a test; no test cites a
 row, so a control can be deleted and the guard still passes as long as the test
 name survives. The hazards also came from defects rather than from a systematic
 sweep over functions, interfaces and foreseeable misuse, and the estimation and
-acceptability columns a risk register needs are not there — the table says so
-itself, and [risk-register.md](risk-register.md) is a seed file until C21 builds
-the register (planned — C21).
+estimation the method needs is still partial. [risk-register.md](risk-register.md)
+adds severity, an ordinal fault reachability and an acceptability verdict at
+C21, but probability of harm reads `unestimated` in all ten rows, so no risk is
+scored and none is evaluated overall.
 
 ## SOUP — partial
 

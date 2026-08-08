@@ -31,11 +31,12 @@ it.
   version.
 - `scripts/check-soup-inventory.sh` — the guard that diffs that document against
   the manifests in both directions. Wired into the CI hygiene job.
-- [risk-register.md](risk-register.md) — the seed file, now folded into the
-  hazard analysis; C21 builds the register proper.
-
-The risk register proper is the remaining part of C21 in
-[../ROADMAP.md](../ROADMAP.md) and is not claimed here.
+- [risk-register.md](risk-register.md) — ten rows scored for severity and an
+  ordinal fault reachability against criteria stated before the table. Probability
+  of harm reads `unestimated` in every row, so no risk score is computed. One
+  row comes out `not demonstrated`, and `scripts/check-hazard-tests.sh` reads
+  this file too as of C21, cross-checking its hazard IDs and labels against the
+  hazard analysis in both directions.
 
 ## The method: from the codebase upward
 
@@ -128,9 +129,13 @@ device category rather than a generic one.
   frightened person reads it as at 03:00.
 - **A design history file**, and design controls under a quality system.
 - **A risk management file** under that quality system, with risk acceptability
-  criteria fixed in advance, probability and severity estimates, and an overall
-  residual risk evaluation. The hazard analysis here has none of those columns
-  and says so.
+  criteria **fixed in advance**, probability estimates, and an overall residual
+  risk evaluation. [risk-register.md](risk-register.md) adds severity and an
+  ordinal reachability at C21 and closes none of these three: its criteria were
+  written after the hazards were known and it names that as a defect in its own
+  method, probability of harm is carried as `unestimated` rather than
+  estimated, and with only one of the two probabilities there is no risk score
+  to evaluate overall.
 - **Verification and validation planning as artifacts separate from the tests.**
   There are many suites; there is no V&V plan they execute.
 - **Biocompatibility, and electrical, thermal, mechanical and EMC testing.**
