@@ -81,7 +81,8 @@ export class DecisionLog {
   }
 
   /**
-   * Decisions in force, counted by kind — the C23 false-alarm signal. Derived
+   * Decisions in force, counted by kind — a dismissal rate, not a rate of wrong
+   * alerts, for the reason docs/product-loop.md gives. Derived
    * with the same `latestDecisions` the dashboard uses, so one function defines
    * "in force" at both ends and a clock step cannot make the counter and the
    * row disagree.

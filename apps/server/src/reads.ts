@@ -397,13 +397,20 @@ export const readsPlugin: FastifyPluginAsync<ReadsPluginOptions> = async (app, o
           "OpenAPI document and the validator are one thing; a drift test in " +
           "reads.test.ts pins the field sets against each other. " +
           "Appends an acknowledgement or a dismissal to the device's decision " +
-          "log (apps/server/src/acks.ts) and returns the appended event. The " +
-          "log is append-only: recording a second decision on the same alert " +
-          "appends a second event and the newest one is the decision in force, " +
-          "so who judged what, and when, survives a change of mind. " +
-          "`acknowledged` means seen and acted on, `dismissed` means seen and " +
-          "judged not actionable — the difference is the false-alarm signal the " +
-          "C23 product loop counts. `actor` is asserted by the caller and is " +
+          "log (apps/server/src/acks.ts) and returns the appended event. No " +
+          "route updates or removes a decision: recording a second decision on " +
+          "the same alert appends a second event and the newest one is the " +
+          "decision in force, so who judged what, and when, survives a change " +
+          "of mind. The log is bounded rather than permanent — it holds the " +
+          "most recent 200 events per device and discards the oldest beyond " +
+          "that, so a heavily decided device loses its earliest decisions and " +
+          "this is not an archive of record. `acknowledged` means seen and " +
+          "acted on, `dismissed` means seen and judged not actionable. Their " +
+          "ratio is a dismissal rate and not a false-positive rate for the " +
+          "alerting: nothing recorded here says whether an alert was correct, " +
+          "and a dismissal may equally mean it was right and handled " +
+          "elsewhere, or that nobody is reading alerts any more. " +
+          "`actor` is asserted by the caller and is " +
           "not authenticated (C22 owns that). The alert record need not still " +
           "be retained: the log outlives the bounded history, so a decision is " +
           "accepted for an alertId this device owns whose rule, raise ordinal " +

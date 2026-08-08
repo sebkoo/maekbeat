@@ -109,9 +109,10 @@ export function AlertTimeline(props: AlertTimelineProps) {
     ...props.silence.map(fromSilence),
   ].sort((a, b) => b.raisedAtMs - a.raisedAtMs);
 
-  // A decision can outlive the alert it judged: the server's decision log is
-  // append-only while its alert history is a bounded cache (docs/DECISIONS.md
-  // #15). Those decisions are shown as their own rows rather than dropped —
+  // A decision can outlive the alert it judged: both the server's decision log
+  // and its alert history are bounded, and the log's bound is the larger of the
+  // two (200 per device against 100, docs/DECISIONS.md #15). Neither is
+  // permanent. Those decisions are shown as their own rows rather than dropped —
   // hiding a judgement because its subject was evicted would lose the only
   // record that anyone triaged the event at all. Silence episodes are bounded
   // too (C20a), so `retained` reads both lists or an acknowledged silent

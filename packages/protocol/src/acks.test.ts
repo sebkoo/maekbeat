@@ -28,7 +28,7 @@ describe("alertDecisionRequestSchema", () => {
     ).toBe(false);
   });
 
-  it("knows only the two decisions that carry the false-alarm signal", () => {
+  it("knows only the two decisions the dismissal rate is counted from", () => {
     expect(alertDecisionRequestSchema.safeParse({ decision: "seen", actor: "a" }).success).toBe(
       false,
     );

@@ -59,16 +59,18 @@ public struct AlertEvent: Codable, Equatable, Sendable, Identifiable {
 /// A caregiver's judgement of an alert, mirroring `alertDecisionSchema`.
 ///
 /// `acknowledged` is seen and acted on; `dismissed` is seen and judged not
-/// actionable. Counting the second against the first is the false-alarm signal
-/// the C23 product loop asks for.
+/// actionable. Counting the second against the first gives a dismissal rate,
+/// not a rate of wrong alerts — nothing recorded here says whether an alert was
+/// correct (docs/product-loop.md).
 public enum AlertDecision: String, Codable, Sendable, CaseIterable {
     case acknowledged
     case dismissed
 }
 
-/// One appended decision, mirroring `alertDecisionEventSchema`. The server's
-/// log has no update and no delete, so a change of mind is another event and
-/// the decision in force is the newest one for an `alertId`.
+/// One appended decision, mirroring `alertDecisionEventSchema`. The server
+/// never updates a decision, so a change of mind is another event and the
+/// decision in force is the newest one for an `alertId`. The log is bounded,
+/// not permanent: it keeps the newest 200 events per device and drops the rest.
 public struct AlertDecisionEvent: Codable, Equatable, Sendable, Identifiable {
     public let eventId: String
     public let alertId: String

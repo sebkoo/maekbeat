@@ -51,7 +51,7 @@ Every row cites the path that implements it, and
 | E5  | data store      | `apps/server/src/store.ts`                               | In-memory ring per device. Nothing is written to disk           |
 | E6  | process         | `apps/server/src/alerts.ts`                              | Threshold engine with hysteresis and cooldown                   |
 | E7  | process         | `apps/server/src/silence.ts`                             | Periodic sweep raising an alarm on absence of data              |
-| E8  | data store      | `apps/server/src/acks.ts`                                | Append-only decision log; no update and no delete               |
+| E8  | data store      | `apps/server/src/acks.ts`                                | Decision log. No update; bounded, evicting oldest at 200/device |
 | E9  | process         | `apps/server/src/stream.ts`                              | Fan-out to dashboard subscribers                                |
 | E10 | process         | `apps/server/src/reads.ts`                               | REST reads and the decision route                               |
 | E11 | external sink   | `apps/web/src`                                           | Browser dashboard, served as static files by `infra/nginx.conf` |

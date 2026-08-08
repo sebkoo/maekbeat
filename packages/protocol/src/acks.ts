@@ -12,10 +12,13 @@ import { z } from "zod";
  */
 
 /**
- * The distinction that carries the signal: `acknowledged` means seen and acted
- * on, `dismissed` means seen and judged not actionable. Counting the second
- * against the first is the false-alarm rate the C23 product loop asks for —
- * one number that a client-side checkbox could never produce.
+ * `acknowledged` means seen and acted on, `dismissed` means seen and judged not
+ * actionable. Counting the second against the first gives a dismissal rate, and
+ * docs/product-loop.md is where that is separated from the rate of wrong alerts
+ * it was once claimed to be: nothing recorded here says whether an alert was
+ * correct, so a dismissal covers a wrong alert, a right one handled elsewhere,
+ * and a caregiver who has stopped reading — the last of which is H7 in
+ * docs/regulatory/hazard-analysis.md.
  */
 export const alertDecisionSchema = z.enum(["acknowledged", "dismissed"]);
 export type AlertDecision = z.infer<typeof alertDecisionSchema>;

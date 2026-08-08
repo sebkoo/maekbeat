@@ -109,8 +109,10 @@ decision is an appended event — `eventId`, `alertId`, `decision`, `actor`,
 derived with `latestDecisions()` and the history survives a change of mind.
 
 The two decisions are `acknowledged` (seen, acted on) and `dismissed` (seen,
-judged not actionable); that distinction is the false-alarm signal the C23
-product loop counts. `actor` is caller-asserted provenance, not an
+judged not actionable). Counting one against the other gives a dismissal rate
+and not a rate of wrong alerts, for the reason
+[docs/product-loop.md](../../docs/product-loop.md) sets out: nothing recorded
+says whether an alert was correct. `actor` is caller-asserted provenance, not an
 authenticated identity — nothing in this system authenticates anything yet.
 
 ## Device silence (since C20a)

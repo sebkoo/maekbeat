@@ -75,6 +75,14 @@ jobs:
       # that one value to the board and refuses a complete phase holding a row
       # with no shipped sha.
       - run: bash scripts/check-phase-status.sh
+      # Two sentences this repository corrected and then wrote again. The
+      # append-only one came back in docs/security/data-flow.md two commits
+      # after the correction, so this is a backstop against literal repetition
+      # and not a check that any document is true — it catches neither
+      # paraphrase nor a claim it has never been taught. Scoped to apps/ and
+      # packages/, where a sentence reads as current; docs/ and this workflow
+      # discuss the errors and must stay free to quote them.
+      - run: bash scripts/check-corrected-claims.sh
 
   # Proves the workspace packages pass their vitest suites and typechecks (first package: C1).
   # Since C9 the suites run once, coverage-enabled: each package's vitest.config.ts

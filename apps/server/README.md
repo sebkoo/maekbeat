@@ -92,9 +92,9 @@ A silence episode is its own record, not an alert with a borrowed metric — see
 
 ## Acknowledgement — `POST /devices/:deviceId/alerts/:alertId/decisions` (since C12)
 
-Appends a decision to the device's log ([src/acks.ts](src/acks.ts)) and returns the appended event. The log is append-only by construction — the class has no update and no delete — so a change of mind appends a second event and the decision in force is the newest one for that alert. Who judged what, and when, survives it, which is the shape [docs/ROADMAP.md](../../docs/ROADMAP.md) C22 needs for the audit log.
+Appends a decision to the device's log ([src/acks.ts](src/acks.ts)) and returns the appended event. The class exposes no update, so a change of mind appends a second event and the decision in force is the newest one for that alert. It is bounded rather than permanent: `limit` is 200 per device and the oldest are spliced away past it, so a change of mind survives but early history need not, which is the shape [docs/ROADMAP.md](../../docs/ROADMAP.md) C22 needs for the audit log.
 
-`acknowledged` means seen and acted on; `dismissed` means seen and judged not actionable. Counting the second against the first is the false-alarm signal the C23 product loop asks for, and both appear in the counters on `GET /devices/:deviceId/alerts` alongside the log itself. A decision on an alert this engine never raised is refused with 404 rather than recorded, because a fiction in an audit log is worse than a missing row.
+`acknowledged` means seen and acted on; `dismissed` means seen and judged not actionable. Counting the second against the first gives a dismissal rate and not a rate of wrong alerts — nothing recorded says whether an alert was correct ([docs/product-loop.md](../../docs/product-loop.md)) — and both appear in the counters on `GET /devices/:deviceId/alerts` alongside the log itself. A decision on an alert this engine never raised is refused with 404 rather than recorded, because a fiction in an audit log is worse than a missing row.
 
 `actor` is asserted by the caller and authenticated by nothing — this server has no identity model at all (see "Declared limits" above). It is provenance, and C22 owns making it a claim worth trusting. Each appended decision is also published to every dashboard watching that device.
 
