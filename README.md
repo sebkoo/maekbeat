@@ -1,13 +1,41 @@
 # Maekbeat
 
-**Pronounced "Mac-beat."** From _maek_ (맥), the Korean word for one's pulse.
-
-Wearable-to-caregiver vitals pipeline, end to end: synthetic BLE vitals → SwiftUI iOS app → Node.js/TypeScript API → AWS → live React caregiver dashboard.
+Maekbeat streams a sleeping person's vitals to whoever is responsible for them,
+and raises an alert when those numbers leave a safe range. It is the whole path
+— wearable to phone to server to dashboard — built with synthetic data and no
+hardware.
 
 [![CI](https://github.com/sebkoo/maekbeat/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/sebkoo/maekbeat/actions/workflows/ci.yml) [![Coverage](https://codecov.io/gh/sebkoo/maekbeat/branch/main/graph/badge.svg)](https://app.codecov.io/gh/sebkoo/maekbeat) [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE) [![Node ≥22](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](.nvmrc) [![Swift 5.10+](https://img.shields.io/badge/swift-5.10%2B-orange)](docs/ROADMAP.md) [![Not a medical device](https://img.shields.io/badge/not_a_medical_device-red)](DISCLAIMER.md)
 
-**Maekbeat is an educational portfolio project, not a medical device, and uses synthetic data only — see [DISCLAIMER.md](DISCLAIMER.md).**
-Out of scope: real medical algorithms · real BLE hardware · protected health information · clinical validation.
+![The Maekbeat dashboard streaming synthetic vitals: an SpO2 desaturation raises an alert, which is then acknowledged](docs/demo/preview.gif)
+
+**Not a medical device.** Every vital comes from `packages/vitals-sim`, no
+hardware exists, and nothing here has been clinically validated —
+[DISCLAIMER.md](DISCLAIMER.md).
+
+## Run it
+
+No checkout and no build. The published image is the one CI pushed:
+
+```sh
+docker run --rm -p 3000:3000 --platform linux/amd64 \
+  ghcr.io/sebkoo/maekbeat/server:latest
+
+curl -s localhost:3000/healthz
+```
+
+```json
+{ "status": "ok", "uptimeSec": 2.5, "version": "0.0.0", "revision": "c3502ab…" }
+```
+
+The response names the commit the image was built from, so you can tell what you
+are running. `--platform linux/amd64` is needed because the image is built for
+amd64 only; Apple Silicon runs it under emulation.
+
+That is the API, not the dashboard — the GIF above is the web app, which needs
+the repository: [running the whole stack](#run-it-from-source).
+
+**Pronounced "Mac-beat."** From _maek_ (맥), the Korean word for one's pulse.
 
 <details>
 <summary>Not an engineer? The 60-second version</summary>
@@ -16,18 +44,38 @@ Imagine a bracelet that counts heartbeats while someone sleeps. Maekbeat is ever
 
 </details>
 
+Out of scope: real medical algorithms · real BLE hardware · protected health information · clinical validation.
+
+## Run it from source
+
+```sh
+git clone https://github.com/sebkoo/maekbeat.git && cd maekbeat && ./scripts/bootstrap.sh
+```
+
+Or run the whole thing with no toolchain at all: `BUILD_REVISION=$(git rev-parse HEAD) docker compose -f infra/compose.yaml up --build` starts the API and the dashboard in two containers, on <http://127.0.0.1:8080>, with no pnpm and no Node installed ([infra/README.md](infra/README.md)).
+
+[scripts/bootstrap.sh](scripts/bootstrap.sh) verifies the toolchain and activates the .githooks. The pipeline is runnable since C6: `pnpm --filter @maekbeat/server demo` streams simulator frames over WebSocket into [apps/server](apps/server), raises and resolves a demo alert on the anomaly scenario (C7), pushes the same frames to a subscribed dashboard socket (C11), and reads it all back over REST.
+
+## About that demo
+
+Captured from the running system by [apps/web/scripts/capture-demo.mjs](apps/web/scripts/capture-demo.mjs) — a real apps/server, a production build of the dashboard, real vitals-sim anomaly frames over a real WebSocket, and a real click on the acknowledgement control. Regenerate it with `pnpm --filter @maekbeat/web demo:gif`; it needs ffmpeg and Chrome, whose path defaults to the macOS location and is overridable with `CHROME_PATH`.
+
+Read no timing off it, and the numbers are measured rather than asserted — the script writes them to [docs/demo/preview.caption.txt](docs/demo/preview.caption.txt) at capture time. This recording is 32 frames sampled every 500 ms and played at 10 fps, so 3.2 seconds of GIF covers 140 seconds of simulated device time: about 44x, averaged over the whole clip.
+
+The clock delta on screen is part of the same artefact. The simulator replays one second of device time every 100 ms, so `receivedAtMs − capturedAtMs` falls by 900 ms per frame and ends deeply negative; it is the replay speed showing through, not a latency this system has. Real latency is C19's to measure.
+
 ## Architecture
 
 ```mermaid
 flowchart LR
   SIM["packages/vitals-sim"] -->|"BLE GATT profile — C15, no peripheral"| IOS["apps/ios"]
   IOS -->|"WebSocket ingest — C15"| API["apps/server API"]
-  API --> Q["queue"]
-  Q --> S3["S3 archive"]
+  API --> Q["queue<br/>PLANNED — not built"]
+  Q --> S3["S3 archive<br/>PLANNED — not built"]
   Q --> AL["alert engine"]
   AL -->|"live stream (C11)"| WEB["apps/web dashboard"]
   AL -->|"live stream (C14)"| IOS
-  AL -->|"Lambda fan-out"| ALERT["caregiver alert"]
+  AL -->|"Lambda fan-out — PLANNED"| ALERT["caregiver alert<br/>PLANNED — not built"]
 ```
 
 That diagram is the target architecture, not today's system — the Status board below is what exists. The full design, with latency budgets and failure modes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -60,26 +108,6 @@ That diagram is the target architecture, not today's system — the Status board
 This table carries no planned entries. A topic appears once the thinking exists and the commit that holds it has shipped, which is why every Status cell reads ✅ — a design note is a record, and a promise belongs in [docs/ROADMAP.md](docs/ROADMAP.md). Three cells said `(planned)` against rows that had already closed until C23 found them; removing the value removes the drift, since a shipped commit does not un-ship.
 
 Engineers: start at [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · the why: [docs/DECISIONS.md](docs/DECISIONS.md) · the plan: [docs/ROADMAP.md](docs/ROADMAP.md).
-
-## Quickstart
-
-```sh
-git clone https://github.com/sebkoo/maekbeat.git && cd maekbeat && ./scripts/bootstrap.sh
-```
-
-Or run the whole thing with no toolchain at all: `BUILD_REVISION=$(git rev-parse HEAD) docker compose -f infra/compose.yaml up --build` starts the API and the dashboard in two containers, on <http://127.0.0.1:8080>, with no pnpm and no Node installed ([infra/README.md](infra/README.md)).
-
-[scripts/bootstrap.sh](scripts/bootstrap.sh) verifies the toolchain and activates the .githooks. The pipeline is runnable since C6: `pnpm --filter @maekbeat/server demo` streams simulator frames over WebSocket into [apps/server](apps/server), raises and resolves a demo alert on the anomaly scenario (C7), pushes the same frames to a subscribed dashboard socket (C11), and reads it all back over REST.
-
-## Demo
-
-![The Maekbeat dashboard streaming synthetic vitals: an SpO2 desaturation raises an alert, which is then acknowledged](docs/demo/preview.gif)
-
-Captured from the running system by [apps/web/scripts/capture-demo.mjs](apps/web/scripts/capture-demo.mjs) — a real apps/server, a production build of the dashboard, real vitals-sim anomaly frames over a real WebSocket, and a real click on the acknowledgement control. Regenerate it with `pnpm --filter @maekbeat/web demo:gif`; it needs ffmpeg and Chrome, whose path defaults to the macOS location and is overridable with `CHROME_PATH`.
-
-Read no timing off it, and the numbers are measured rather than asserted — the script writes them to [docs/demo/preview.caption.txt](docs/demo/preview.caption.txt) at capture time. This recording is 32 frames sampled every 500 ms and played at 10 fps, so 3.2 seconds of GIF covers 140 seconds of simulated device time: about 44x, averaged over the whole clip.
-
-The clock delta on screen is part of the same artefact. The simulator replays one second of device time every 100 ms, so `receivedAtMs − capturedAtMs` falls by 900 ms per frame and ends deeply negative; it is the replay speed showing through, not a latency this system has. Real latency is C19's to measure.
 
 ## Repository tour
 
