@@ -2,6 +2,21 @@
 
 Pre-ship checklist. Run every step; fix findings before committing.
 
+**What belongs here.** A check earns a step when both hold: the diff in front of
+you can break it, and the fix is a judgement — rewording, re-deciding,
+re-scoping — rather than a mechanical re-run. Checks that fail only on
+infrastructure edits, or whose fix is a one-token correction, stay in CI, where
+catching them late costs a re-run and not a rewrite. Duplicating a hook is not a
+disqualifier: steps 8–10 run gates the hooks also enforce, so the commit does
+not bounce.
+
+This rule was written at C23, after `scripts/check-corrected-claims.sh` was
+added to CI and not here and nothing could say whether that was an omission. Two
+guards were missing at that point, `check-phase-status.sh` since 2026-08-07 and
+`check-corrected-claims.sh` the same day it landed; both are steps below. A list
+with no stated membership rule cannot adjudicate a candidate, which is what
+`docs/DECISIONS.md` #33 had to fix for the badge cap.
+
 1. Banned-word grep (must return zero hits; the excluded files define the rule):
 
    ```sh
@@ -67,3 +82,28 @@ Pre-ship checklist. Run every step; fix findings before committing.
     bash scripts/check-soup-inventory.sh
     bash scripts/check-dataflow-paths.sh
     ```
+
+13. Phase status. Whether a phase is finished is a judgement the script refuses
+    to derive; this only checks that the roadmap heading and the README board
+    say the same thing, so a disagreement is yours to resolve:
+
+    ```sh
+    bash scripts/check-phase-status.sh
+    ```
+
+14. Corrected claims — two sentences this repository wrote, corrected, and wrote
+    again. It runs here because its whole value is timing: it catches a phrase
+    while the diff is still a draft, and one reintroduction reached `main`
+    because CI is the only place it was checked. Reword the hit; the script
+    header says what each should say instead:
+
+    ```sh
+    bash scripts/check-corrected-claims.sh
+    ```
+
+`scripts/test-githooks.sh` and `scripts/check-action-versions.sh` are
+deliberately CI-only, not omissions. Neither can be broken by a normal diff —
+one fails only on `.githooks/` or the banned-regex, the other only on a
+workflow's action pins — and both fixes are mechanical rather than a judgement,
+so the rule above excludes them. `scripts/check-e2e-skips.sh` takes an e2e log
+as an argument and cannot run standalone at all.

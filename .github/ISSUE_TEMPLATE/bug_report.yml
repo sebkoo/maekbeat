@@ -1,0 +1,43 @@
+name: Bug report
+description: Something behaves differently from what the repository says it does.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Every vital in this system comes from `packages/vitals-sim`. There is no
+        device and no patient — [DISCLAIMER.md](../../DISCLAIMER.md). A report
+        that a reading looks clinically wrong is a simulator question, not a bug.
+
+  - type: input
+    id: revision
+    attributes:
+      label: Which build
+      description: "`GET /healthz` returns a `revision`. Paste it, or the commit sha you built from."
+      placeholder: "c3502ab"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What the repository says should happen
+      description: Quote the file that says it — a README, a route description, docs/ROADMAP.md. A bug is a gap between a claim and the behaviour, so name the claim.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: Commands and their output, or the response body. Logs beat prose.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The quickstart in README.md is one starting point. Say which scenario and seed if `packages/vitals-sim` is involved — the generator is deterministic, so a seed makes this exact.
+    validations:
+      required: true

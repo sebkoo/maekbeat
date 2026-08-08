@@ -1,0 +1,36 @@
+name: Architecture discussion
+description: Question or challenge a design decision, or propose one.
+labels: ["architecture discussion"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Decisions live in [docs/DECISIONS.md](../../docs/DECISIONS.md) with their
+        alternatives and trade-offs, and the deeper ones in `docs/adr/`. The
+        useful version of this issue disagrees with a specific entry rather than
+        with the architecture in general.
+
+  - type: input
+    id: decision
+    attributes:
+      label: Which decision
+      description: 'A `docs/DECISIONS.md` number, an ADR path, or "none yet" if you are proposing one that has never been made.'
+      placeholder: "docs/DECISIONS.md #29"
+    validations:
+      required: true
+
+  - type: textarea
+    id: position
+    attributes:
+      label: What you would do differently, and what it costs
+      description: Every entry in that file names alternatives and trade-offs. Yours needs the same shape — an option with no stated cost cannot be compared against one that has one.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: What would settle it
+      description: A measurement, a failing case, a constraint from outside this repository. Optional, and the most valuable box here.
+    validations:
+      required: false

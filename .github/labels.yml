@@ -1,0 +1,24 @@
+# The three labels this repository sorts issues with.
+#
+# NOTHING SYNCS THIS FILE. Labels live in GitHub's own settings, and no job here
+# reads or applies this list — it is a record of what was created and why, so a
+# reader can see the intent without an account. GitHub is the source of truth; if
+# the two disagree, this file is the stale one.
+#
+# Applied with: gh label create "<name>" --color <color> --description "<desc>"
+
+- name: good first issue
+  color: "7057ff"
+  description: Self-contained, one file or one test, and the acceptance criterion is already written down.
+
+- name: help wanted
+  color: "008672"
+  description: Real work with a known shape, larger than a first issue, and nobody is on it.
+
+- name: architecture discussion
+  color: "d876e3"
+  description: A design decision to make or revisit. Ends in a docs/DECISIONS.md entry, not always in code.
+
+- name: bug
+  color: "d73a4a"
+  description: Behaviour disagrees with something this repository claims in writing.

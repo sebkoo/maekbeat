@@ -162,4 +162,4 @@ Built with an AI-assisted workflow under human review — every diff is read, ru
 
 ---
 
-The plan: [docs/ROADMAP.md](docs/ROADMAP.md) · contributing: [CONTRIBUTING.md](CONTRIBUTING.md) (good-first-issues arrive at C23) · license: [Apache-2.0](LICENSE).
+The plan: [docs/ROADMAP.md](docs/ROADMAP.md) · contributing: [CONTRIBUTING.md](CONTRIBUTING.md) ([good first issue](https://github.com/sebkoo/maekbeat/issues?q=is%3Aopen+label%3A%22good+first+issue%22)) · license: [Apache-2.0](LICENSE).

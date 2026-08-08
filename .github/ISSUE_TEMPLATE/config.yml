@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: What this project is, and is not
+    url: https://github.com/sebkoo/maekbeat/blob/main/DISCLAIMER.md
+    about: Synthetic vitals only. No device, no patient, nothing clinically validated. Read this before filing anything that assumes otherwise.
+  - name: Security reporting
+    url: https://github.com/sebkoo/maekbeat/blob/main/SECURITY.md
+    about: Do not open a public issue for a vulnerability. SECURITY.md says where to send it.

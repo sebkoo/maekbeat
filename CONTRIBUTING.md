@@ -38,6 +38,21 @@ npx --yes prettier@3.9.6 --check --ignore-unknown .
 npx --yes markdownlint-cli2@0.23.2 "**/*.md" "#**/node_modules"
 ```
 
+## Issues
+
+Two forms in `.github/ISSUE_TEMPLATE/` — a bug report and an architecture
+discussion — and the blank issue stays enabled for anything neither fits, which
+is a GitHub setting rather than a file here. The bug form asks
+which claim the behaviour disagrees with, because in this repository a bug is a
+gap between a written claim and what runs.
+
+Four labels, declared with their meanings in [.github/labels.yml](.github/labels.yml)
+— nothing syncs that file, so GitHub is the authority and it is the record. Two
+filters, which resolve against whatever is labelled at the time you open them:
+
+- [good first issue](https://github.com/sebkoo/maekbeat/issues?q=is%3Aopen+label%3A%22good+first+issue%22)
+- [help wanted](https://github.com/sebkoo/maekbeat/issues?q=is%3Aopen+label%3A%22help+wanted%22)
+
 ## Pull requests
 
 PRs use `.github/pull_request_template.md`. Fill in every section,
