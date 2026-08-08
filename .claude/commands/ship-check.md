@@ -63,4 +63,5 @@ Pre-ship checklist. Run every step; fix findings before committing.
     ```sh
     bash scripts/check-hazard-tests.sh
     bash scripts/check-soup-inventory.sh
+    bash scripts/check-dataflow-paths.sh
     ```

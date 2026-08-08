@@ -59,6 +59,14 @@ jobs:
       # the dependency name set on none of them. The blind spots that leaves,
       # the transitive set and the toolchain, are written down in the script.
       - run: bash scripts/check-soup-inventory.sh
+      # Every element and boundary in docs/security/data-flow.md cites the
+      # path that implements it, and this fails when one stops resolving. A
+      # diagram is the artifact that rots most quietly: a box labelled with a
+      # module renamed six commits ago renders exactly like a correct one. It
+      # reads two marked tables rather than prose, because asserting over every
+      # path-shaped token in docs/regulatory/ fails 22 times out of 100 on
+      # nouns, slash commands and SOUP identifiers.
+      - run: bash scripts/check-dataflow-paths.sh
       # The phase status marker, which every neighbouring claim on the board is
       # checked against and which nothing checked itself. Phase 6 stayed "(in
       # progress)" on the roadmap and unchecked on the README while the row read

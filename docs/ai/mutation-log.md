@@ -2212,3 +2212,65 @@ Q1 and Q2 named the sha and not the chip, because the failing loop reads a flat
 set and has lost which link each sha came from. That is now one grep for the
 file and line rather than a restructure of which loop reports: both print
 `linked at README.md:108`. Q3's message was already specific and is unchanged.
+
+## C22 — the data-flow diagram, and what its guard could not be
+
+`scripts/check-dataflow-paths.sh` asserts that every element and boundary in
+`docs/security/data-flow.md` cites a path that resolves. Four mutations, each
+applied by writing over the target and reverted by `cp`, with `diff -q` clean
+between:
+
+| Guard                             | Mutation                                                         | Result |
+| --------------------------------- | ---------------------------------------------------------------- | ------ |
+| a cited path must exist           | point E7 at `apps/server/src/quiet.ts`                           | caught |
+| a table must hold rows            | empty the elements table, markers intact                         | caught |
+| a region must be findable         | rename `<!-- dfd:boundaries -->` to `<!-- dfd:boundary -->`      | caught |
+| a renamed module is the real case | `mv apps/server/src/silence.ts apps/server/src/silence.ts.moved` | caught |
+
+The fourth is the one worth keeping. The other three break the document; that
+one breaks the world the document describes, which is the failure a diagram
+actually suffers and the one it shows least — a box labelled with a module
+renamed six commits ago renders exactly like a correct one.
+
+### The measurement that scoped the guard, and what it costs a C21 candidate
+
+The guard reads two marked tables rather than prose, and the general form was
+tried first: assert that every backticked path-shaped token in
+`docs/regulatory/` resolves. **22 failures out of 100 citations, and almost none
+is an error.** `.swift` and `.md` appear as nouns, `/ship-check` is a slash
+command, `actions/cache`, `grafana/k6`, `realm/SwiftLint` and
+`nginxinc/nginx-unprivileged` are SOUP identifiers rather than paths,
+`webstore.iec.ch/en/publication/22794` is a URL, and
+`apps/ios/.../BLE/LinkState.swift` is deliberately elided. A guard failing 22
+times on its first run is one somebody switches off inside a week.
+
+**This changes a candidate C21 recorded, and the record should not be read
+without it.** C21's closing bullet defers the "nothing checks a prose claim
+about another file" gap and justifies deferring rather than declining it on the
+grounds that a check is possible. That is still true, but its cost is now
+measured rather than assumed: the naive form does not work, because a
+path-shaped token in prose is not a path and no rule on shape separates the two.
+A working version needs a **declaration mechanism** — a marked region, a
+dedicated column, some convention by which a path is a path because the document
+says so rather than because it looks like one. That is what this commit built
+for one document, and it is what the candidate would need for the rest. A future
+reader picking that candidate up as cheap would be picking up the 22-failure
+version.
+
+### The claim this commit made about another file, and got wrong
+
+The first draft of `docs/security/data-flow.md` said `docs/ARCHITECTURE.md`'s flowchart
+depicts components that no longer exist. It does depict a queue and an S3
+archive, and neither exists — but that file **says so itself**, in the Dev
+form / Target form table directly beneath the diagram: the queue reads "SQS is
+target architecture, no commit assigned, and infra/cdk omits it deliberately",
+and the archive reads "planned, no commit assigned".
+
+The section was written from the diagram without reading the table under it.
+That is the fifth prose claim about another file this sequence has corrected,
+and the first committed **inside** a document whose subject is artifacts that rot
+and whose guard exists to prevent exactly this. It is recorded rather than
+quietly fixed because the useful part is not the error, it is that knowing the
+failure mode in detail, while writing about it, did not prevent committing it.
+No guard here would have caught it: `check-dataflow-paths.sh` verifies that
+`docs/ARCHITECTURE.md` exists, not that a sentence about it is true.

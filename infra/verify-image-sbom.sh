@@ -19,8 +19,10 @@
 #
 # What that buys and what it does not: this runs wherever the image is built,
 # which is every push and every pull request, and on a laptop. It is NOT one of
-# the eight hygiene guards and is not a /ship-check step, because it needs a
-# container build and those are second-scale shell checks.
+# the hygiene-job guards and is not a /ship-check step, because it needs a
+# container build and those are second-scale shell checks. (This line said
+# "the eight hygiene guards" until the commit that added a ninth made it stale,
+# one commit later — hence no count.)
 #
 # THE FORMAT IS SPDX, NOT CYCLONEDX. BuildKit's `sbom: true` emits an SPDX
 # document with predicate type `https://spdx.dev/Document`, produced by the Syft
@@ -76,6 +78,10 @@
 # (`@fastify/error`, `@opentelemetry/core`, `ajv`, `abbrev`). A check seen only
 # refusing is no better established than one seen only agreeing, which is why
 # that run happened before this shipped rather than after the first red runner.
+#
+# The cost this header deferred to the first run: the image job went 1m24s to
+# 1m25s at 6bbae8f, so the second build cost about a second and the gha cache
+# hit completely. Measured, not projected.
 set -uo pipefail
 
 cd "$(dirname "$0")/.."

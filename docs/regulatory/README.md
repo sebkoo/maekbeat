@@ -38,6 +38,12 @@ it.
   this file too as of C21, cross-checking its hazard IDs and labels against the
   hazard analysis in both directions.
 
+The security documents live next door in [../security/](../security/) and are
+governed by this file: the data-flow diagram since C22, and the threat model
+that consumes it. They are a different argument — where an attacker could
+stand rather than how a device fails — and they are kept apart for that
+reason rather than by accident.
+
 ## The method: from the codebase upward
 
 A regulatory document written from the standard downward produces a table of
