@@ -29,7 +29,9 @@ Pre-ship checklist. Run every step; fix findings before committing.
    grep -riEn "FDA[- ](ready|compliant)" --exclude-dir=.git --exclude-dir=.claude --exclude-dir=node_modules --exclude=CLAUDE.md .
    ```
 
-5. README badge count — 6 today (coverage joined at C9), hard cap 7.
+5. README badge count — 6 today (coverage joined at C9), hard cap 7. What the
+   cap protects and the three tests a candidate must pass are `docs/DECISIONS.md`
+   #33; the slot is unspent because both candidates failed them.
    Counts badge images only: since C12 the README also embeds the demo GIF,
    which is content, not a badge.
 
