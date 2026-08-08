@@ -1,5 +1,16 @@
 #!/usr/bin/env bash
-# A data-flow diagram is a claim about where the code is. This checks the claim.
+# A data-flow diagram is a claim about where the code is. This checks the claim,
+# in both directions across the diagram's edge:
+#
+#   OUT  every element and boundary in docs/security/data-flow.md cites a path,
+#        and every one of those paths must exist on disk.
+#   IN   every B<n> and E<n> that docs/security/threat-model.md cites must be an
+#        id the diagram declares.
+#
+# The name says only the first half. That is a naming choice explained at the
+# bottom of this header, not a hidden capability — a reader grepping for the
+# threat-model check should find it here, so it is stated in the second sentence
+# rather than forty lines down.
 #
 # docs/security/data-flow.md names, for every element it draws and every
 # boundary the data crosses, the path that implements it. A diagram is the
@@ -36,12 +47,31 @@
 # disk. Folding it into a script whose name and header are about hazard tests
 # would leave a reader of either one unsure which rules apply.
 #
+# SINCE C22 IT ALSO CHECKS REFERENCES INTO THE DIAGRAM, not only out of it.
+# docs/security/threat-model.md cites the B<n> and E<n> each threat concerns,
+# and a threat pointing at a boundary that was renamed or removed is how that
+# document rots first — the diagram is the thing that moves under it.
+#
+# That is an extension rather than a tenth script, and the test is the one used
+# to split this file off from check-hazard-tests.sh: is the assertion the same
+# KIND? It is. Both halves read a marked table, take a declared label, and
+# assert it resolves to something — a file on disk for the elements, a declared
+# id for the threats. check-hazard-tests.sh resolves a citation to a test that
+# RUNS, which is a different question and stays where it is. Adding a script to
+# keep the shapes symmetrical would be symmetry, not necessity.
+#
+# The name understates the job and is kept anyway: renaming one commit after
+# creation would churn ci.yml, ship-check.md and the mutation log to buy a
+# better word, and the subject is still the diagram — what changed is that both
+# directions across its boundary are checked.
+#
 # Run by the CI hygiene job and by /ship-check. It reads the working tree.
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
 
 DOC=docs/security/data-flow.md
+THREATS=docs/security/threat-model.md
 SECTIONS="elements boundaries"
 
 failures=0
@@ -100,9 +130,58 @@ EOF
   fi
 done
 
+# ---------------------------------------------------------------------------
+# References INTO the diagram: every B<n> and E<n> a threat cites must be an id
+# the diagram declares.
+# ---------------------------------------------------------------------------
+declared_ids=$(
+  for section in $SECTIONS; do
+    awk -v want="$section" '
+      $0 ~ ("^<!-- /dfd:" want " -->$") { inside = 0; next }
+      $0 ~ ("^<!-- dfd:" want " -->$")  { inside = 1; next }
+      inside && /^\|/ { print }
+    ' "$DOC"
+  done | sed -E 's/^\|[[:space:]]*//; s/[[:space:]]*\|.*$//' | grep -E '^[BE][0-9]+$' | sort -u
+)
+
+if [ -z "$declared_ids" ]; then
+  fail "$DOC declares no B<n> or E<n> ids, so nothing can be checked against it."
+  note "  The id column moved out from under the parser. A check with nothing"
+  note "  to resolve against accepts every reference ever written."
+fi
+
+refs=0
+if [ ! -f "$THREATS" ]; then
+  fail "$THREATS does not exist; its references into the diagram are unchecked."
+elif ! grep -qF '<!-- dfd:threats -->' "$THREATS" || ! grep -qF '<!-- /dfd:threats -->' "$THREATS"; then
+  fail "$THREATS is missing its <!-- dfd:threats --> markers."
+  note "  The checked region cannot be found, so no threat reference is read."
+else
+  cited=$(awk '
+    /^<!-- \/dfd:threats -->$/ { inside = 0; next }
+    /^<!-- dfd:threats -->$/   { inside = 1; next }
+    inside && /^\|/ { print }
+  ' "$THREATS" | grep -ohE '`[BE][0-9]+`' | tr -d '`' | sort -u)
+
+  if [ -z "$cited" ]; then
+    fail "$THREATS has its markers and cites no diagram id between them."
+    note "  A threat naming no boundary or element is a threat about nothing in"
+    note "  particular, and this check would read zero of them."
+  fi
+
+  while IFS= read -r id; do
+    [ -z "$id" ] && continue
+    refs=$((refs + 1))
+    printf '%s\n' "$declared_ids" | grep -qxF "$id" ||
+      fail "$THREATS cites \`$id\`, which $DOC does not declare."
+  done <<EOF
+$cited
+EOF
+fi
+
 if [ "$failures" -gt 0 ]; then
-  note "$failures problem(s) across $checked path(s)."
+  note "$failures problem(s) across $checked path(s) and $refs reference(s)."
   exit 1
 fi
 
-echo "dataflow-paths: $checked paths across ${SECTIONS// /, }, all present."
+echo "dataflow-paths: $checked paths, $refs threat reference(s), all resolve."

@@ -2274,3 +2274,44 @@ quietly fixed because the useful part is not the error, it is that knowing the
 failure mode in detail, while writing about it, did not prevent committing it.
 No guard here would have caught it: `check-dataflow-paths.sh` verifies that
 `docs/ARCHITECTURE.md` exists, not that a sentence about it is true.
+
+## C22 — the threat model, and the guard extended to read it
+
+`scripts/check-dataflow-paths.sh` grows a second half: every `B<n>` and `E<n>`
+that `docs/security/threat-model.md` cites must be an id
+`docs/security/data-flow.md` declares. An extension rather than a tenth script,
+by the same test that split this file off from `check-hazard-tests.sh` — both
+halves read a marked table, take a declared label, and assert it resolves to
+something. Adding a script to keep the shapes symmetrical would be symmetry.
+
+| Guard                                    | Mutation                                                    | Result            |
+| ---------------------------------------- | ----------------------------------------------------------- | ----------------- |
+| a cited id must be declared              | a threat cites `B9`, which the diagram has no row for       | caught            |
+| removing a declared id breaks its citers | delete the `B3` row from the diagram, threats still cite it | caught            |
+| the threat table must hold rows          | empty it, markers intact                                    | caught            |
+| the threat document must exist           | move `threat-model.md` aside                                | caught            |
+| the id column must be parseable          | rewrite every id as `id-E4`, so nothing resolves against it | caught            |
+| a renamed id breaks its citers           | `E9` to `E99` in the diagram only                           | caught            |
+| ~~a renamed id nothing cites~~           | `E1` to `X1`, and no threat cites `E1`                      | **mis-specified** |
+
+The last row is recorded rather than deleted, for the reason the C21 battery
+recorded a mis-specified perturbation instead of quietly dropping it. It was
+written to test "the diagram's id column moved" and it does not: renaming an id
+that nothing references breaks nothing, so passing is the correct answer and the
+mutation asks the guard a question with no wrong answer. The version that tests
+the intended property is the fifth row, which makes every id unparseable at
+once. A perturbation that passes for the wrong reason is easy to re-run later
+and misread as coverage.
+
+### What the model does not have a guard for, stated where it is measurable
+
+The threat rows cite hazard ids — `H2`, `H3`, `H4`, `H7` — as prose, and
+**nothing asserts those exist.** That is the same measured limitation the path
+half of this script has: 22 of 100 path-shaped tokens in prose are not paths,
+and no rule on shape separates a real `H2` reference from the characters `H2`
+appearing in a sentence. Making them checkable needs the declaration mechanism
+this repository has built in `soup-inventory.md`, `risk-register.md`,
+`data-flow.md` and now `threat-model.md` — a marked region with a column that
+means something. They are named rather than counted, because a count in prose is
+a fact in two places and this sequence has already corrected five of those. The threat model says so itself rather than implying its harm
+citations are checked.

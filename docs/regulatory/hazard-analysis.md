@@ -111,5 +111,45 @@ reader who knows the standard checks first.
   so a control can be deleted and the guard still passes as long as the test
   name survives.
 
+## What C22's threat model found that this table does not carry
+
+Added at C22 so a reader of this file learns what a reader of
+[../security/threat-model.md](../security/threat-model.md) already knows: **that
+model names three things about this table.** Two are absences and one is a route
+into a row that is here.
+
+- **An alert falsely marked triaged.** `actor` on a decision is a caller-asserted
+  string, so an alert can be recorded acknowledged by a name that triaged
+  nothing, and it then leaves the undecided set H2's control rations. H2 covers
+  an untriaged alert being _discarded_; nothing here covers one being _falsely
+  marked_, and the harm is the same missed alert.
+- **The server itself exhausted.** Nothing bounds how many fan-out subscribers
+  exist, so enough concurrent subscriptions end monitoring for every device at
+  once. That reaches H4's harm by a route H4 never considered, since H4 is about
+  one quiet device.
+- **H4 reached by suppression rather than by failure.** Injected frames reset the
+  last-seen stamp, so a device that has genuinely stopped reads as alive and the
+  silence sweep never fires. This is not a missing hazard — it is a residual H4
+  does not currently name.
+
+**Disposition, under this table's own admission rule.** The opening lines admit
+a hazard only if it came from a defect that actually happened here and is pinned
+by a test — the rule that put the battery and BLE-range hazards in the register
+as `register-only` rather than here. The first two land on the same side: neither
+has ever happened, neither has a control, and neither can be admitted without
+suspending the rule. They belong where H9 and H10 already are — **owed as two
+register rows, and the row that closes C22 carries that debt**, alongside the
+sweep and prose-claims candidates C21 named, so it sits where owed work is
+tracked rather than in a paragraph nobody re-reads. The third is
+different in kind: H4 exists, so its residual is a row-level amendment rather
+than an admission question, and the amendment is not made here because touching
+that row's text would move it out of step with the register that cross-checks it.
+
+**This section is prose and no guard reads it.** `scripts/check-hazard-tests.sh`
+checks that the rows above cite tests that run; it has nothing to say about
+whether this paragraph is true or whether the threat model still says what it
+says. That is the same limit the threat model states about its own hazard
+citations, and it is the third document in this repository to say so.
+
 C21 builds the register these rows feed, with the columns this table does not
 have.

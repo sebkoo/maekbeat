@@ -79,9 +79,14 @@
 # refusing is no better established than one seen only agreeing, which is why
 # that run happened before this shipped rather than after the first red runner.
 #
-# The cost this header deferred to the first run: the image job went 1m24s to
-# 1m25s at 6bbae8f, so the second build cost about a second and the gha cache
-# hit completely. Measured, not projected.
+# The cost this header deferred to the first run, corrected once there were
+# enough runs to correct it: the image job read 1m24s before the SBOM build,
+# 1m25s at 6bbae8f, and 1m33s at 80688fb, which changed nothing in that job. So
+# the run-to-run variance is around eight seconds and the one-second delta sits
+# inside it. What is supported is that the second build's cost is BELOW the
+# job's noise floor across three runs — not that it is one second. A single
+# observation of a one-second difference against an eight-second spread is not a
+# measurement of that difference, and the earlier wording claimed it was.
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
