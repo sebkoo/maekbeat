@@ -23,11 +23,13 @@ it.
   control.
 - `scripts/check-hazard-tests.sh` — the guard that fails the build when one of
   those citations stops resolving. Wired into the CI hygiene job.
+- [lifecycle-map.md](lifecycle-map.md) — which of this repository's practices
+  correspond to which lifecycle process, and which processes have nothing here
+  at all. Five of its fourteen rows read absent.
 - [risk-register.md](risk-register.md) — the seed file, now folded into the
   hazard analysis; C21 builds the register proper.
 
-The lifecycle map — which of this repository's existing practices correspond to
-which lifecycle process, and the SOUP inventory — is C21 in
+The SOUP inventory is the remaining half of C21 in
 [../ROADMAP.md](../ROADMAP.md) and is not claimed here.
 
 ## The method: from the codebase upward
