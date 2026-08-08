@@ -131,6 +131,25 @@ into a row that is here.
   device that has stopped reset its last-seen stamp, so it reads as alive and the
   silence sweep never fires. This is not a missing hazard — it is a residual H4
   does not currently name, and H4's residual now names it.
+- **H2's harm at a third site, and the three states are the finding.**
+  `apps/server/src/audit.ts` (C22) is a third bounded store that discards its
+  oldest. It is not simply a repeat: it counts what it discards, where the
+  decision log does not — but nothing serves that count, where the alert history
+  is served on `GET /devices`. So the three sites sit in three states rather
+  than two, and the middle one is where this repository now is:
+
+  | Store                       | Eviction is     | Reachable by  |
+  | --------------------------- | --------------- | ------------- |
+  | alert history (`alerts.ts`) | counted, served | anyone, today |
+  | audit log (`audit.ts`)      | counted         | nobody, today |
+  | decision log (`acks.ts`)    | uncounted       | nobody, ever  |
+
+  The audit log is genuinely better than the decision log and genuinely worse
+  than the alert history, and the gap is a read path — no route serves it and no
+  view shows it, so its events are **recorded and not detectable**. That read
+  path is owed, and the row that closes C22 carries it beside the two register
+  rows below.
+
 - **H2's harm at a second site.** `apps/server/src/acks.ts` bounds its decision
   log at 200 events per device and splices the oldest away — the same forced
   eviction H2 is about, in a store H2 does not look at, and without the counting

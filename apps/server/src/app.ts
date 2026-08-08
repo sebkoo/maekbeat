@@ -12,6 +12,7 @@ import { INGEST_MAX_PAYLOAD_BYTES, ingestPlugin, type IngestCounters } from "./i
 import { readsPlugin } from "./reads";
 import { SilenceDetector, silencePlugin, sweepIntervalFor } from "./silence";
 import { VitalsStore } from "./store";
+import { AuditLog } from "./audit";
 import { DeviceBroadcaster, streamPlugin } from "./stream";
 import { packageVersion } from "./version";
 
@@ -21,6 +22,13 @@ declare module "fastify" {
     alertEngine: AlertEngine;
     deviceBroadcaster: DeviceBroadcaster;
     decisionLog: DecisionLog;
+    /**
+     * Bounded ring plus monotonic counters (src/audit.ts). Decorated so a test
+     * can read what a state change recorded; nothing else reads it, which is
+     * why the claim is that events are RECORDED and not that they are
+     * detectable — no route serves this and no view shows it (C22).
+     */
+    auditLog: AuditLog;
     /**
      * Decorated for the same reason the engine is, and for one more: the sweep
      * is the only thing in this server that runs on a timer with no request
@@ -116,16 +124,27 @@ export async function buildApp(config: ServerConfig, options: BuildAppOptions = 
 
   const store = new VitalsStore(config.RING_CAPACITY);
   const decisions = new DecisionLog();
+  // Bounded ring plus monotonic counters (src/audit.ts). The warns below stay:
+  // they go to stdout, which nothing in this repository reads back, and this
+  // records the same events where a read path could later find them.
+  const audit = new AuditLog();
   // The engine evicts triaged alerts first and asks the log which those are;
   // a forced eviction — the history full of undecided alerts — is an
   // operational signal, so it is logged rather than counted quietly.
   const engine = new AlertEngine(options.alertRules ?? DEFAULT_ALERT_RULES, {
     isDecided: (deviceId, alertId) => decisions.isDecided(deviceId, alertId),
-    onForcedEviction: ({ deviceId, alertId }) =>
+    onForcedEviction: ({ deviceId, alertId }) => {
+      audit.record({
+        kind: "alert.evicted",
+        deviceId,
+        recordedAtMs: Date.now(),
+        detail: `dropped ${alertId}: history full of undecided alerts`,
+      });
       app.log.warn(
         { deviceId, alertId },
         "alert history full of undecided alerts; dropped the oldest undecided one",
-      ),
+      );
+    },
   });
   const broadcaster = new DeviceBroadcaster();
   // Reads the store's last-seen stamps on a timer and touches nothing on the
@@ -134,17 +153,25 @@ export async function buildApp(config: ServerConfig, options: BuildAppOptions = 
     source: store,
     silenceMs: config.DEVICE_SILENCE_MS,
     isDecided: (deviceId, alertId) => decisions.isDecided(deviceId, alertId),
-    onForcedEviction: ({ deviceId, alertId }) =>
+    onForcedEviction: ({ deviceId, alertId }) => {
+      audit.record({
+        kind: "silence.evicted",
+        deviceId,
+        recordedAtMs: Date.now(),
+        detail: `dropped ${alertId}: silence history full of undecided episodes`,
+      });
       app.log.warn(
         { deviceId, alertId },
         "silence history full of undecided episodes; dropped the oldest closed one",
-      ),
+      );
+    },
   });
   const counters: IngestCounters = { received: 0, rejectedInvalid: 0 };
   app.decorate("vitalsStore", store);
   app.decorate("alertEngine", engine);
   app.decorate("deviceBroadcaster", broadcaster);
   app.decorate("decisionLog", decisions);
+  app.decorate("auditLog", audit);
   app.decorate("silenceDetector", silence);
 
   await app.register(fastifyWebsocket, { options: { maxPayload: INGEST_MAX_PAYLOAD_BYTES } });
@@ -161,6 +188,13 @@ export async function buildApp(config: ServerConfig, options: BuildAppOptions = 
     broadcaster,
     ringCapacity: config.RING_CAPACITY,
     heartbeatMs: config.STREAM_HEARTBEAT_MS,
+    onSubscriberDropped: ({ deviceId, bufferedBytes }) =>
+      audit.record({
+        kind: "stream.dropped",
+        deviceId,
+        recordedAtMs: Date.now(),
+        detail: `dropped a subscriber buffering ${bufferedBytes} bytes`,
+      }),
   });
   if (options.armSilenceSweep !== false) {
     await app.register(silencePlugin, {

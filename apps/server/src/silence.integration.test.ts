@@ -194,6 +194,16 @@ describe("a device that stops sending", () => {
         String(message).includes("silence history full of undecided episodes"),
       ),
     ).toBe(true);
+
+    // And recorded, not only warned. The warn reaches stdout and nothing here
+    // reads stdout back; src/audit.ts is where a later read path would find it
+    // (C22). Asserted here because this is the only place a silence eviction
+    // is forced through buildApp — without it the seam was covered but
+    // unproven, and deleting the record call left all 214 tests green.
+    const audited = app.auditLog.list().filter((event) => event.kind === "silence.evicted");
+    expect(audited).toHaveLength(1);
+    expect(audited[0]?.deviceId).toBe(DEVICE_ID);
+    expect(audited[0]?.detail).toContain("silence history full of undecided episodes");
   });
 
   it("rejects a decision on a silence episode this device never had", async () => {

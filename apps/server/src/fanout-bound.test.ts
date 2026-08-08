@@ -177,6 +177,18 @@ describe("a subscriber that stops reading", () => {
     expect(app.deviceBroadcaster.subscriberCount(DEVICE)).toBe(1);
     expect(healthy.frames()).toHaveLength(sent);
     expect(stalled.destroyed).toBe(false);
+
+    // The drop is recorded, not only warned about. The warn goes to stdout and
+    // nothing in this repository reads stdout back; src/audit.ts is where a
+    // later read path would find it (C22, TH5). Asserted here rather than in a
+    // second test because this is the only place a subscriber is actually
+    // dropped, and without the assertion the seam was covered but unproven —
+    // deleting the call from stream.ts left every suite green.
+    const audited = app.auditLog.list().filter((event) => event.kind === "stream.dropped");
+    expect(audited.length).toBeGreaterThan(0);
+    expect(audited[0]?.deviceId).toBe(DEVICE);
+    expect(audited[0]?.detail).toContain("bytes");
+    expect(app.auditLog.totals().byKind["stream.dropped"]).toBe(audited.length);
   }, 120_000);
 });
 

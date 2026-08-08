@@ -166,11 +166,16 @@ export interface StreamPluginOptions {
   /** Silence allowed on a subscriber socket before a ping; see
    *  STREAM_HEARTBEAT_MS_DEFAULT for the number and the reasoning. */
   heartbeatMs: number;
+  /** Called when a subscriber is dropped for outrunning its send buffer. The
+   *  warn beside it goes to stdout and nothing here reads stdout; this seam is
+   *  what lets src/audit.ts record the event where a later read path could
+   *  find it (C22, TH5). Optional, so every existing registration is unchanged. */
+  onSubscriberDropped?: (info: { deviceId: string; bufferedBytes: number }) => void;
 }
 
 /** WS fan-out at GET /devices/:deviceId/stream. */
 export const streamPlugin: FastifyPluginAsync<StreamPluginOptions> = async (app, opts) => {
-  const { broadcaster, ringCapacity, heartbeatMs } = opts;
+  const { broadcaster, ringCapacity, heartbeatMs, onSubscriberDropped } = opts;
 
   app.route<{ Params: { deviceId: string } }>({
     method: "GET",
@@ -286,6 +291,7 @@ export const streamPlugin: FastifyPluginAsync<StreamPluginOptions> = async (app,
             { deviceId, bufferedBytes: socket.bufferedAmount, limit: STREAM_MAX_BUFFERED_BYTES },
             "dropping stream subscriber that fell behind the send buffer limit",
           );
+          onSubscriberDropped?.({ deviceId, bufferedBytes: socket.bufferedAmount });
           socket.close(STREAM_SLOW_SUBSCRIBER_CLOSE, "stream buffer limit exceeded");
           return;
         }
