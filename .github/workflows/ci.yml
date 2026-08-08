@@ -398,6 +398,37 @@ jobs:
           echo "the built image reports $arch"
       - run: bash infra/verify-image-identity.sh maekbeat-server:ci
       - run: bash infra/verify-image.sh
+      # A second build, not a second output on the first one, and the reason is
+      # what this job already holds. The build above uses `load: true` so that
+      # infra/verify-image.sh can run the container and infra/verify-image-
+      # identity.sh can inspect it; an OCI archive is a file and neither script
+      # can read one. Attaching an SBOM to that build instead would mean
+      # attesting through the docker exporter, which this repository has not
+      # established works on a classic image store — the runner's, not this
+      # laptop's — so the archive is produced separately where the exporter is
+      # known to carry attestations.
+      #
+      # It reuses the same gha cache scope, so the layers are not rebuilt; what
+      # is paid for is the Syft scan and the tar export. That cost is unmeasured
+      # on the runner and is deliberately not guessed at here — this job takes
+      # about 1m24s today, and the first run after this lands is what says by
+      # how much that moves.
+      - name: Build again with an SBOM attestation, as an OCI archive
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: infra/server.Dockerfile
+          platforms: linux/amd64
+          build-args: BUILD_REVISION=${{ steps.rev.outputs.sha }}
+          sbom: true
+          outputs: type=oci,dest=/tmp/server-oci.tar
+          builder: ${{ steps.buildx.outputs.name }}
+          cache-from: type=gha,scope=server-amd64
+      # The bill of materials is checked against the manifest that decides what
+      # ships, rather than being generated and filed. Reads the archive with tar
+      # and jq, so it needs no registry and no credentials and runs on every
+      # pull request, which a check against ghcr.io could not.
+      - run: bash infra/verify-image-sbom.sh /tmp/server-oci.tar
 
   # Publishes the server image to GHCR, and only ever from main.
   #
