@@ -2332,3 +2332,46 @@ this repository has built in `soup-inventory.md`, `risk-register.md`,
 means something. They are named rather than counted, because a count in prose is
 a fact in two places and this sequence has already corrected five of those. The threat model says so itself rather than implying its harm
 citations are checked.
+
+## C23 — three under-swept corrections in one row, and the worst one was written here
+
+Every correction in this row was found to reach further than the commit that
+designated it, and the pattern is worth more than any of the three instances.
+
+The first designated `packages/protocol/src/acks.ts` for the false-alarm claim.
+Sweeping before fixing found seven files. The row was widened before anything
+was edited, so nothing shipped half-corrected — but the designation had been
+written from a reading rather than a sweep, and a reading found one seventh of
+it.
+
+The second was found by sweeping for the _other_ claim while widening the first.
+C22 corrected `DecisionLog`'s docstring where it said the log was append-only,
+and the log is bounded at 200 entries per device. That correction named two
+files. The claim was live in four more, including a route schema description
+served to every API client. The two sets overlap at `apps/server/README.md` and
+`apps/server/src/reads.ts`, so the correction covers ten files rather than
+twelve.
+
+**The third is self-inflicted and it is the one to record.**
+`docs/security/data-flow.md` line 54 says "Append-only decision log; no update
+and no delete". That sentence was written into this repository at C22, **two
+commits after C22 corrected that exact sentence elsewhere**, by the same session
+that made the correction. It went into a document written specifically to be
+checkable, in a row about making claims checkable, guarded by a script that
+verifies paths and identifiers and reads no prose. No mechanism could have
+caught it and the author had the correction in working memory.
+
+That is the argument for `scripts/check-corrected-claims.sh` and also its limit.
+The failure mode here is literal reproduction of a sentence known to be wrong —
+not paraphrase, not drift, not a subtle overclaim. A fixed-string check catches
+exactly that and nothing more, which is the whole reason it is affordable: it
+needs no declaration mechanism, unlike the prose-claims candidate above, whose
+naive form fails 22 times in 100. **It is not progress on that candidate.** It
+is a list of two sentences this repository has already got wrong.
+
+The scope is where the design is. The banned phrasings must be quotable in the
+documents that record them as errors, including this one, so the guard runs over
+`apps/` and `packages/` and not `docs/`. That is a boundary — a statement is
+banned where a reader takes it as current — rather than an exclusion list, which
+is the shape argued against for the SOUP guard at C21 and would be the same
+defect here.
