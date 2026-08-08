@@ -2244,6 +2244,23 @@ command, `actions/cache`, `grafana/k6`, `realm/SwiftLint` and
 `apps/ios/.../BLE/LinkState.swift` is deliberately elided. A guard failing 22
 times on its first run is one somebody switches off inside a week.
 
+**C23 added the strongest evidence this candidate has, and it is not about
+paths.** A docstring in `packages/protocol/src/acks.ts` claimed that counting
+`dismissed` against `acknowledged` gives the false-alarm rate C23 asks for. It
+does not — H7's harm is that a missed alert and a dismissal are indistinguishable
+in the log — and the interesting part is not the error but its spread. **One
+claim, written once, had propagated to seven places in four languages**: two
+`.ts` packages, a `.swift` contract file, a route schema description that is
+served to any client reading the API, and two READMEs. Nothing caught any of
+them. It surfaced only because `docs/product-loop.md`, written three commits
+later, contradicted them in detail — a document, not a guard.
+
+That is the cost of not having the check, measured rather than argued: the
+22-in-100 finding says the naive form does not work, and this says what goes
+unnoticed while it does not exist. Whatever eventually guards prose claims about
+other files has to survive one claim being restated in four languages, which no
+single-file rule would.
+
 **This changes a candidate C21 recorded, and the record should not be read
 without it.** C21's closing bullet defers the "nothing checks a prose claim
 about another file" gap and justifies deferring rather than declining it on the
