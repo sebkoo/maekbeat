@@ -26,10 +26,15 @@ it.
 - [lifecycle-map.md](lifecycle-map.md) — which of this repository's practices
   correspond to which lifecycle process, and which processes have nothing here
   at all. Five of its fourteen rows read absent.
+- [soup-inventory.md](soup-inventory.md) — every dependency this project did not
+  write, in five classes, recorded by identity and role and deliberately not by
+  version.
+- `scripts/check-soup-inventory.sh` — the guard that diffs that document against
+  the manifests in both directions. Wired into the CI hygiene job.
 - [risk-register.md](risk-register.md) — the seed file, now folded into the
   hazard analysis; C21 builds the register proper.
 
-The SOUP inventory is the remaining half of C21 in
+The risk register proper is the remaining part of C21 in
 [../ROADMAP.md](../ROADMAP.md) and is not claimed here.
 
 ## The method: from the codebase upward
@@ -142,7 +147,12 @@ device category rather than a generic one.
 - **Software documentation at the level FDA asks for in a premarket submission**,
   per "Content of Premarket Submissions for Device Software Functions" (Docket
   FDA-2021-D-0775; availability notice 88 FR 38870, 2023-06-14).
-- **A SOUP inventory and a lifecycle map** — planned, C21.
+- **SOUP analysis beyond an inventory.** The inventory and the lifecycle map
+  landed at C21, and both are narrower than this item was. No published anomaly
+  list has been reviewed for a single dependency, no functional or performance
+  requirement is stated for any of them, and the 340 package versions
+  `pnpm-lock.yaml` resolves are outside the analysis entirely
+  ([soup-inventory.md](soup-inventory.md)).
 - **Post-market surveillance.** `SECURITY.md` describes coordinated disclosure
   for a repository, which is not the same obligation.
 

@@ -1891,3 +1891,112 @@ than shipped, so the measurement was taken on code that differs from what
 landed. Applied to a copy of `NotificationCoordinator.swift`, reverted from that
 copy, verified by `shasum` against the copy and `git show HEAD:`, rebuilt after
 the mutation and after the revert.
+
+## C21 — the SOUP inventory diffed against the manifests
+
+`scripts/check-soup-inventory.sh` claims that every dependency this project did
+not write is named in `docs/regulatory/soup-inventory.md`. Each mutation below
+breaks that correspondence one way and asks whether the script notices.
+
+| Guard                            | Mutation                                                                       | Result         |
+| -------------------------------- | ------------------------------------------------------------------------------ | -------------- |
+| an item leaves the document      | delete the `fastify` row from the server runtime table                         | caught         |
+| an item the manifests never had  | add a `left-pad` row beside `react-router`                                     | caught         |
+| a dependency enters the build    | add `p-limit` to `apps/server/package.json` dependencies                       | caught         |
+| an action leaves the document    | delete the `actions/cache` row                                                 | caught         |
+| a base image leaves the document | delete the `grafana/k6` row                                                    | caught         |
+| a build tool leaves the document | delete the `prettier` row                                                      | caught         |
+| a row the parser cannot read     | strip the backticks from `jsdom`'s first cell, leaving the row intact          | caught         |
+| a class goes unread              | rename the marker `<!-- soup:actions -->` to `<!-- soup:action -->`            | caught         |
+| the npm source reads nothing     | point the `find` expression at `package.jsonX`, so the manifest side is empty  | caught         |
+| an action enters CI              | replace `uses: actions/cache@v6` with `uses: foo/bar@v1` in `ci.yml`           | caught         |
+| a document that claims nothing   | empty every row's first cell, markers and tables intact                        | caught         |
+| a base image is swapped          | `ARG NGINX_IMAGE` from `nginxinc/nginx-unprivileged` to `caddy:2-alpine`       | caught         |
+| a build tool is swapped          | `npx --yes prettier@3.9.6` to `npx --yes biome@2.0.0` in the `docs-lint` job   | caught         |
+| a Swift package appears          | add one `.package(url: .../swift-log.git)` line to `MaekbeatKit/Package.swift` | **NOT CAUGHT** |
+
+The negative controls matter as much as the rows above, because the guard's
+whole design is that it keys on names and never on versions. Each of these must
+leave it green, and each does:
+
+| Property                            | Mutation                                                    | Result |
+| ----------------------------------- | ----------------------------------------------------------- | ------ |
+| a version bump is not a SOUP change | `fastify` `^5.x` to `^99.0.0` in `apps/server/package.json` | green  |
+| a workspace link is not SOUP        | add `@maekbeat/vitals-sim` to `apps/server` dependencies    | green  |
+| an action version bump              | `actions/cache@v6` to `actions/cache@v7`                    | green  |
+| a base image version bump           | `node:22.22.0-alpine3.22` to `node:24.0.0-alpine3.22`       | green  |
+
+**Read this before trusting the two tables above: the harness misreported its
+own state at least once, and the cause was never found.** One run of the battery
+printed its closing line, `final — tree restored — exit 0`, and the very next
+command in the same shell ran `scripts/check-soup-inventory.sh` and got a
+failure. Those two statements cannot both be true of the same tree, and the
+battery is the one that produced every row above.
+
+**No cause is offered, because none was established.** The plausible stories —
+a restore that had not completed, a stale copy, an editor writing underneath —
+were all consistent with the evidence and none was demonstrated, so none is
+written here as though it were. Recording a guess would be worse than recording
+the gap, because the next person would stop looking.
+
+What is established is the state afterwards, verified five independent ways
+rather than by re-running the thing in question: a residue grep against each of
+the five mutation targets in turn (`swift-log` in `Package.swift`, `p-limit` in
+`apps/server/package.json`, `foo/bar` and `biome` in `ci.yml`, `caddy` in
+`infra/web.Dockerfile`, `left-pad` in the inventory), all zero;
+`git diff --stat` showing only the files this commit intends to change; and all
+eight hygiene guards run with their exit codes printed individually, all zero.
+The tables above were then re-run in full against that verified tree.
+
+Two rules come out of it, and they are the point of writing this down.
+**A battery's own summary line is not evidence about the tree it mutated** —
+verification has to come from outside the thing being verified, which is the
+same principle the guards themselves rest on. And **`guard-a && guard-b` hides
+a failure**: when the first command fails the second never runs, and its
+absence from the output reads exactly like a pass. Guards here are run
+separately with each exit code printed, never chained.
+
+**The NOT CAUGHT row changed the script.** Adding a real Swift package
+dependency to `Package.swift` left the guard printing `50 items, document and
+manifests agree` and exiting 0. The cause was not a broken parser but a missing
+one: `apps/ios` declares no Swift dependencies, so the first draft was given no
+Swift source, and a source that is never read cannot disagree with anything.
+Every other class fails loudly on drift; this one failed silently, which is the
+only failure mode a guard must not have.
+
+The fix is an assertion rather than a fifth class. A Swift class with an empty
+manifest side would trip the script's own "a source that reads nothing agrees
+with any document" rule on every run, and a guard that is red by design gets
+switched off. So the document's claim — that `apps/ios` declares zero external
+Swift packages — is checked as a claim: any `Package.swift` declaring anything
+now fails, naming the line it found and telling the reader to build the class
+and the table together.
+
+**The row stays NOT CAUGHT because that is what the first run showed, and the
+two runs together are the record.** Same mutation, same file, twice: against the
+guard as written it exited 0 with `document and manifests agree`, and against
+the guard with the assertion it exits 1 naming the `.package(url: ...)` line it
+found. Recording only the second would describe a script that was always right,
+and recording only the first would describe a limitation that still exists.
+Neither is what happened.
+
+One row was already caught before its check existed, and the check was still
+worth writing. "Every row emptied" failed through the opposite direction — all
+50 manifest items came back unnamed — producing 151 lines across 50 reports of
+a dependency entering the build, when what had happened was that one document
+left. The reader would go looking for 50 new dependencies. The document-side
+assertion now names the cause in 17 lines and skips the diff for a class that
+declared nothing, because a guard is also a thing people read while it is red.
+
+Two blind spots have no mutation here and cannot have one. Versions are outside
+the guard by design, so a pin moving backwards is invisible — that is the trade
+the name-keyed design buys, argued in the script header and measured by the four
+negative controls. And the transitive closure is outside both the document and
+the check in both languages: 340 resolved package versions against 37 declared
+on the npm side, and on the Swift side `Package.resolved` is where a transitive
+set would be written and nothing reads it. What M14 closed is the direct
+declaration, not what resolves beneath it.
+
+Every mutation was applied by writing a modified copy over the target and
+restored by `cp` from a backup taken before the first one; six paths were backed
+up, one per target. No `git` command appears in the battery.

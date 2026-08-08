@@ -50,6 +50,15 @@ jobs:
       # rots because nothing connects it to the system it describes; this is
       # the connection, and it is why C20 is engineering rather than paperwork.
       - run: bash scripts/check-hazard-tests.sh
+      # Every dependency this project did not write is named in
+      # docs/regulatory/soup-inventory.md, and this diffs that document against
+      # the manifests in both directions — an item named there that no manifest
+      # carries, or one in a manifest that the document does not name. It checks
+      # identities and deliberately not versions, so a Dependabot bump does not
+      # turn it red: replaying all 12 bumps in this repository's history changes
+      # the dependency name set on none of them. The blind spots that leaves,
+      # the transitive set and the toolchain, are written down in the script.
+      - run: bash scripts/check-soup-inventory.sh
       # The phase status marker, which every neighbouring claim on the board is
       # checked against and which nothing checked itself. Phase 6 stayed "(in
       # progress)" on the roadmap and unchecked on the README while the row read

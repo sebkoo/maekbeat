@@ -57,3 +57,10 @@ Pre-ship checklist. Run every step; fix findings before committing.
 10. `bash scripts/check-commit-hygiene.sh`
 11. No `.swift` `.ts` `.tsx` `.js` `.jsx` `.kt` files exist before their
     roadmap commit (see `docs/ROADMAP.md`).
+12. The `docs/regulatory/` guards. Both documents say they run here, and
+    until C21 neither did — `hazard-analysis.md` has claimed it since C20:
+
+    ```sh
+    bash scripts/check-hazard-tests.sh
+    bash scripts/check-soup-inventory.sh
+    ```

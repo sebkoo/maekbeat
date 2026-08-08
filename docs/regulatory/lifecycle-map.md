@@ -36,26 +36,26 @@ something checks it; **partial** means an artifact exists and nothing checks it,
 or it covers one part of the area; **absent** means there is nothing; **planned
 — C(n)** means nothing yet, with the commit that changes it named.
 
-| Process area                         | What exists here                                                                                   | Verdict       |
-| ------------------------------------ | -------------------------------------------------------------------------------------------------- | ------------- |
-| Development planning                 | Nothing. `docs/ROADMAP.md` sequences features, which is a different artifact                       | Absent        |
-| Requirements analysis                | `packages/protocol` zod schemas, `packages/vitals-sim/golden` fixtures, `docs/ble-gatt-profile.md` | Partial       |
-| Architectural design                 | `docs/ARCHITECTURE.md`, `docs/adr/0001-stack-and-name.md`, `docs/DECISIONS.md`                     | Partial       |
-| Detailed design                      | Nothing between architecture and source                                                            | Absent        |
-| Unit implementation and verification | Per-package suites, coverage ratchets, `docs/ai/mutation-log.md`                                   | Practice      |
-| Integration and integration testing  | `apps/server/src/*.integration.test.ts`, `infra/compose-smoke.sh`, the `compose` CI job            | Practice      |
-| System testing                       | `apps/web/e2e/journey.spec.ts` through a real browser against a real server                        | Practice      |
-| V&V planning                         | Nothing. The suites execute no plan                                                                | Absent        |
-| Release                              | Container build, `infra/verify-image-identity.sh`, GHCR publish from `main` alone                  | Partial       |
-| Configuration management             | git with linear history, `.githooks/`, `scripts/check-commit-hygiene.sh`, `pnpm-lock.yaml`         | Practice      |
-| Problem resolution                   | Nothing. `docs/ai/mutation-log.md` records deliberate breaks, not reported problems                | Absent        |
-| Risk management                      | `docs/regulatory/hazard-analysis.md` + `scripts/check-hazard-tests.sh`                             | Practice      |
-| SOUP                                 | Nothing                                                                                            | Planned — C21 |
-| Maintenance                          | Dependabot alone (`.github/dependabot.yml`, `docs/DECISIONS.md` #27)                               | Absent        |
+| Process area                         | What exists here                                                                                   | Verdict  |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------- | -------- |
+| Development planning                 | Nothing. `docs/ROADMAP.md` sequences features, which is a different artifact                       | Absent   |
+| Requirements analysis                | `packages/protocol` zod schemas, `packages/vitals-sim/golden` fixtures, `docs/ble-gatt-profile.md` | Partial  |
+| Architectural design                 | `docs/ARCHITECTURE.md`, `docs/adr/0001-stack-and-name.md`, `docs/DECISIONS.md`                     | Partial  |
+| Detailed design                      | Nothing between architecture and source                                                            | Absent   |
+| Unit implementation and verification | Per-package suites, coverage ratchets, `docs/ai/mutation-log.md`                                   | Practice |
+| Integration and integration testing  | `apps/server/src/*.integration.test.ts`, `infra/compose-smoke.sh`, the `compose` CI job            | Practice |
+| System testing                       | `apps/web/e2e/journey.spec.ts` through a real browser against a real server                        | Practice |
+| V&V planning                         | Nothing. The suites execute no plan                                                                | Absent   |
+| Release                              | Container build, `infra/verify-image-identity.sh`, GHCR publish from `main` alone                  | Partial  |
+| Configuration management             | git with linear history, `.githooks/`, `scripts/check-commit-hygiene.sh`, `pnpm-lock.yaml`         | Practice |
+| Problem resolution                   | Nothing. `docs/ai/mutation-log.md` records deliberate breaks, not reported problems                | Absent   |
+| Risk management                      | `docs/regulatory/hazard-analysis.md` + `scripts/check-hazard-tests.sh`                             | Practice |
+| SOUP                                 | `docs/regulatory/soup-inventory.md` + `scripts/check-soup-inventory.sh`                            | Partial  |
+| Maintenance                          | Dependabot alone (`.github/dependabot.yml`, `docs/DECISIONS.md` #27)                               | Absent   |
 
-Five rows read **practice**, and every one of them is a verification or control
-activity. Every absent row is a planning or record-keeping activity. That
-pattern is the finding, and the last section returns to it.
+Five rows read **practice** and five read **absent**. The split runs roughly
+along verification against planning, with an exception on each side that the
+last section works through rather than rounds off.
 
 **Where a row reads absent, the "What exists here" cell says nothing rather
 than naming the nearest adjacent artifact.** That rule is the whole
@@ -133,8 +133,8 @@ subscriber's stream was considered and rejected, and hazard H3 cites that
 rejection as its control.
 
 **What is absent.** No diagram or document identifies SOUP items inside the
-architecture, and the inventory planned in this row will be a list beside the
-architecture rather than a decomposition of it. No interface specification exists
+architecture — [soup-inventory.md](soup-inventory.md) is a list beside the
+architecture, not a decomposition of it. No interface specification exists
 apart from the schemas. Segregation is not identified anywhere, because nothing
 here is segregated: `apps/server` is one process with one in-memory store, and
 `docs/regulatory/hazard-analysis.md` rows H1, H2 and H6 all end at the same
@@ -244,8 +244,9 @@ checked by the registry rather than by the job that pushed it: the `publish` job
 pulls the SHA tag back out of `ghcr.io`, runs `infra/verify-image-identity.sh`
 against what came back, and asserts `latest` resolves to the same digest.
 Reproducibility has real support — `pnpm-lock.yaml` at lockfileVersion 9.0, base
-images pinned to a patch digest-adjacent tag in `infra/*.Dockerfile`, and
-`pnpm install --frozen-lockfile` in every CI job.
+images pinned to a patch-level tag in `infra/*.Dockerfile`, and
+`pnpm install --frozen-lockfile` in the four CI jobs that install dependencies
+at all (`tests`, `smoke`, `compose`, `ios`; the other four never do).
 
 **What is absent.** This repository cuts no version tags, so `latest` means "the
 newest commit on `main` that passed CI" and there is no released version to
@@ -271,11 +272,13 @@ precisely so that somebody else's release cannot turn a green build red
 (`docs/DECISIONS.md` #26).
 
 **What is absent.** Change control is one person merging their own pull
-requests. No configuration item is identified as SOUP anywhere (planned — C21),
-and three tools that gate every build — the prettier and markdownlint pins in
-the `docs-lint` job, and the checksummed SwiftLint download in the `ios` job —
-are pinned in `.github/workflows/ci.yml` rather than in any manifest, so
-`pnpm install --frozen-lockfile` does not reproduce them.
+requests. SOUP is identified as of C21 and the identification is checked, but
+three tools that gate every build — the prettier and markdownlint pins in the
+`docs-lint` job, and the checksummed SwiftLint download in the `ios` job — are
+pinned in `.github/workflows/ci.yml` rather than in any manifest, so
+`pnpm install --frozen-lockfile` does not reproduce them. Versions are outside
+what the SOUP guard checks by design ([soup-inventory.md](soup-inventory.md)),
+so a pin moving backwards is caught by nothing here.
 
 ## Problem resolution — absent
 
@@ -324,7 +327,7 @@ acceptability columns a risk register needs are not there — the table says so
 itself, and [risk-register.md](risk-register.md) is a seed file until C21 builds
 the register (planned — C21).
 
-## SOUP — planned, C21
+## SOUP — partial
 
 **What the area asks for.** Each SOUP item identified by title, manufacturer and
 version; the functional and performance requirements it must meet stated; the
@@ -332,13 +335,21 @@ hardware and software it needs in order to meet them stated; its published
 anomaly list evaluated for whether any known defect can produce a hazardous
 situation; and the whole set held under configuration management.
 
-**What is here.** Nothing. No document in this repository identifies a single
-dependency as SOUP, and the workspace declares 37 third-party npm packages
-across six manifests before counting actions, base images and build tools.
+**What is here.** [soup-inventory.md](soup-inventory.md) names 50 items across
+five classes — npm dependencies, GitHub Actions, container base images, build
+tools pinned outside every manifest, and the platform — each with the role it
+plays here. `scripts/check-soup-inventory.sh` diffs that document against the
+manifests in both directions and fails on either kind of disagreement, so the
+identification stays true rather than staying written.
 
-**Planned in this row.** A SOUP inventory and a guard that diffs it against the
-manifests — the same commit that lands them updates this section. Until then
-this row is empty, and `README.md` lists the missing inventory among the gaps.
+**What is absent, which is most of the list above.** No functional or
+performance requirement is stated for any item, and no published anomaly list
+has been reviewed for a single one — the analysis that would decide whether a
+known defect in a dependency can reach a patient has not been started. The
+inventory records identity and role and deliberately not version, so it is not
+the identification-by-version the area asks for; `pnpm-lock.yaml` is, and the
+two are not the same artifact. The transitive set is outside all of it: 340
+resolved package versions against the 37 declared.
 
 ## Maintenance — absent
 
