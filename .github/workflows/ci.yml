@@ -508,6 +508,20 @@ jobs:
       # pipeline reporting on itself; this is the registry reporting.
       - run: docker pull "${{ steps.ref.outputs.image }}:${{ github.sha }}"
       - run: bash infra/verify-image-identity.sh "${{ steps.ref.outputs.image }}:${{ github.sha }}"
+      # Can a stranger pull it? Every step above this line runs after
+      # docker/login-action, so a plain `docker pull` here would succeed on this
+      # runner's credentials and prove nothing about a reader who has none. That
+      # matters because README.md's quickstart tells people to pull `:latest`,
+      # and whether that works depends on a GHCR visibility setting changed
+      # through a web UI with nothing in the tree noticing — C19 recorded the
+      # package as private and deliberately left this unasserted, it is public
+      # today, and nothing anywhere records when that changed or who did it.
+      #
+      # The script speaks HTTP to the registry and never reads the docker
+      # config, so it cannot authenticate even by accident, and it separates
+      # "the package is not public" from "the registry could not be asked" —
+      # a green build meaning "we could not tell" is the failure it prevents.
+      - run: bash infra/verify-image-public.sh "${{ steps.ref.outputs.image }}:latest"
       # The two tags must be one artifact. They are pushed in a single operation
       # today, so this passes by construction — it is here so that splitting
       # them into two pushes later cannot leave `latest` pointing somewhere else
